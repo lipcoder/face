@@ -1,17 +1,17 @@
-Mixed License Notice
+PolyForm Noncommercial License 1.0.0
 
-The original code authored specifically for this repository is licensed under
-the MIT License. See LICENSE-MIT.
+Copyright (c) 2026 lipcoder
 
-This repository may contain, modify, wrap, or depend on third-party components,
-including InspireFace / InsightFace. Those third-party components are governed
-by their own upstream license terms.
+This project is licensed under the PolyForm Noncommercial License 1.0.0.
 
-Pre-trained models, model weights, model packs, and auto-downloaded model files
-from InspireFace / InsightFace are not covered by this repository's MIT License.
+You may use, copy, modify, and distribute this software for noncommercial
+purposes only, including learning, research, experimentation, testing,
+personal study, and educational use.
 
-Upstream notices indicate that such models are limited to academic /
-non-commercial research use and prohibit commercial use unless a separate
-license is obtained.
+Commercial use is not permitted without prior written permission from
+the copyright holder.
 
-See THIRD_PARTY_NOTICES.md for details.
+SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+Full license text:
+https://polyformproject.org/licenses/noncommercial/1.0.0/
