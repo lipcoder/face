@@ -6,14 +6,13 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// InitFacesTable 初始化 pgvector 插件和 faces 表
-// 如果你已经在数据库里手动建过表，可以不调用这个函数
+// InitFacesTable 初始化 pgvector 插件和 faces 表。
+// 如果你已经在数据库里手动建过表，可以不调用这个函数。
 func InitFacesTable(ctx context.Context) error {
-	db, err := openDB(ctx)
+	db, err := GetDB(ctx)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 
 	_, err = db.ExecContext(ctx, `
 		CREATE EXTENSION IF NOT EXISTS vector;
