@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,6 +14,14 @@ var attendanceRecordMu sync.Mutex
 func RecordFaceSimilarity(name string, faceSimilarity float64) error {
 	attendanceRecordMu.Lock()
 	defer attendanceRecordMu.Unlock()
+
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, "\n", "_")
+	name = strings.ReplaceAll(name, "\r", "_")
+
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
 
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -39,7 +48,6 @@ func RecordFaceSimilarity(name string, faceSimilarity float64) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	line := fmt.Sprintf(
 		"%s %s %.6f\n",
@@ -48,6 +56,12 @@ func RecordFaceSimilarity(name string, faceSimilarity float64) error {
 		faceSimilarity,
 	)
 
-	_, err = file.WriteString(line)
-	return err
+	_, writeErr := file.WriteString(line)
+	closeErr := file.Close()
+
+	if writeErr != nil {
+		return writeErr
+	}
+
+	return closeErr
 }

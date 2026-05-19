@@ -1,5 +1,7 @@
 package camera
 
+import "context"
+
 type Camera interface {
-	Capture() ([]byte, error)
+	Capture(ctx context.Context) ([]byte, error)
 }

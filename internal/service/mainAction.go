@@ -8,6 +8,7 @@ import (
 	"lipcoder/face/internal/data"
 	"lipcoder/face/internal/recognition"
 	"strings"
+	"sync"
 )
 
 type AdminRequest struct {
@@ -30,8 +31,12 @@ func StartAdminLoop(
 	reqCh <-chan AdminRequest,
 	addFaceSem chan struct{},
 	facedb data.Facedb,
+	wg *sync.WaitGroup,
 ) error {
 	for {
+		if wg == nil {
+			return errors.New("wait group cannot be nil")
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -47,6 +52,7 @@ func StartAdminLoop(
 					exists: false,
 					err:    errors.New("no name"),
 				})
+				continue
 			}
 			if req.rec == nil {
 				sendAdminResult(ctx, req.Reply, AdminResult{
@@ -55,6 +61,7 @@ func StartAdminLoop(
 					exists: false,
 					err:    errors.New("Recognition cannot be nil"),
 				})
+				continue
 			}
 
 			switch req.action {
@@ -66,6 +73,7 @@ func StartAdminLoop(
 						exists: false,
 						err:    errors.New("camera cannot be nil"),
 					})
+					continue
 				}
 				go handleAddFaceRequest(ctx, req, facedb, addFaceSem)
 
@@ -77,6 +85,7 @@ func StartAdminLoop(
 						exists: false,
 						err:    err,
 					})
+					continue
 				}
 				sendAdminResult(ctx, req.Reply, AdminResult{
 					name:   req.name,
@@ -94,6 +103,7 @@ func StartAdminLoop(
 						exists: exists,
 						err:    err,
 					})
+					continue
 				}
 				sendAdminResult(ctx, req.Reply, AdminResult{
 					name:   req.name,
@@ -133,12 +143,57 @@ func handleAddFaceRequest(
 			<-addFaceSem
 		}()
 	}
-	_, err := AddFaceFromCamera(ctx, req.name, req.cam, facedb, req.rec)
+	_, err := addFaceFromCamera(ctx, req.name, req.cam, facedb, req.rec)
 	sendAdminResult(ctx, req.Reply, AdminResult{
 		name:   req.name,
 		action: req.action,
 		err:    err,
 	})
+}
+
+func addFaceFromCamera(
+	ctx context.Context,
+	name string,
+	cam camera.Camera,
+	facedb data.Facedb,
+	rec recognition.Recognition,
+) (int64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	imageBytes, err := cam.Capture(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("mainAction get image failed,%w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	embedding, err := rec.GetFaceEmbedding(imageBytes, 0)
+	if err != nil {
+		return 0, fmt.Errorf("get embedding from recognition response: %w", err)
+	}
+
+	if len(embedding) == 0 {
+		return 0, recognition.ErrNoFaceEmbedding
+	}
+
+	id, err := facedb.AddFace(ctx, name, embedding[0])
+	if err != nil {
+		if errors.Is(err, data.ErrAlreadyExists) {
+			return 0, data.ErrAlreadyExists
+		}
+
+		return 0, fmt.Errorf("add face to database: %w", err)
+	}
+
+	return id, nil
 }
 
 // 返回请求

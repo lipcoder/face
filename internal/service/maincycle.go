@@ -13,7 +13,7 @@ import (
 const (
 	DefaultFaceInterval   = 500 * time.Millisecond
 	DefaultFaceSimilarity = 0.45
-	DefaultFaceQuality    = 0.45
+	// DefaultFaceQuality    = 0.45	
 )
 
 // 每隔interval获取一次图像
@@ -53,10 +53,10 @@ func SignIn(
 
 		case <-ticker.C:
 			bestembedding, err := extractBestEmbeddingFromCamera(ctx, cam, rec)
-			if err == recognition.ErrNoFace {
+			if errors.Is(err, recognition.ErrNoFace) {
 				continue
 			}
-			if err == recognition.ErrNoFaceEmbedding {
+			if errors.Is(err, recognition.ErrNoFaceEmbedding) {
 				continue
 			}
 			if err != nil {
@@ -90,7 +90,7 @@ func extractBestEmbeddingFromCamera(
 	default:
 	}
 
-	imageBytes, err := cam.Capture()
+	imageBytes, err := cam.Capture(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("mainCycle get image failed,%w", err)
 	}
@@ -102,7 +102,13 @@ func extractBestEmbeddingFromCamera(
 	}
 
 	embedding, err := rec.GetFaceEmbedding(imageBytes, 1)
+	if err != nil {
+		return nil, fmt.Errorf("get embedding from recognition response: %w", err)
+	}
 	if embedding == nil {
+		return nil, err
+	}
+	if len(embedding) == 0 {
 		return nil, err
 	}
 
