@@ -60,7 +60,7 @@ func main() {
 		Timeout: 8 * time.Second,
 	}
 
-	// 初始化海康摄像头
+	// 初始化摄像头
 	cam, err := local.NewLocalCamera(0)
 	if err != nil {
 		logger.Error("init local camera failed", "err", err)
