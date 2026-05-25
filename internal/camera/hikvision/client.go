@@ -48,15 +48,16 @@ func NewHik(cfg Config, client *http.Client) (*Hik, error) {
 }
 
 var (
+	ErrHik     = errors.New("hik image")
 	ErrUrl     = errors.New("url failed")
 	ErrRequest = errors.New("request failed")
 	ErrImage   = errors.New("image failed")
 )
 
-func (a *Hik) Capture(context context.Context) ([]byte, error) {
+func (a *Hik) Capture(ctx context.Context) ([]byte, error) {
 	con := a.Config
 
-	imageBytes, err := a.getWebImage(con.Host, con.Username, con.Password)
+	imageBytes, err := a.getWebImage(ctx, con.Host, con.Username, con.Password)
 	if err != nil {
 		return nil, fmt.Errorf("capture hikvision image: %w", err)
 	}
@@ -64,8 +65,8 @@ func (a *Hik) Capture(context context.Context) ([]byte, error) {
 	return imageBytes, nil
 }
 
-func (a *Hik) getWebImage(URL, username, passwd string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, URL, nil)
+func (a *Hik) getWebImage(ctx context.Context, URL, username, passwd string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w create request failed: %w", ErrUrl, err)
 	}
@@ -81,7 +82,7 @@ func (a *Hik) getWebImage(URL, username, passwd string) ([]byte, error) {
 	contentType := resp.Header.Get("Content-Type")
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 
 		return nil, fmt.Errorf(
 			"%w: status=%d, contentType=%s, body=%s",
@@ -99,7 +100,7 @@ func (a *Hik) getWebImage(URL, username, passwd string) ([]byte, error) {
 	}
 
 	if err = validateImageBytes(imageBytes); err != nil {
-		return nil, fmt.Errorf("%w:%w", ErrImage, err)
+		return nil, fmt.Errorf("%w: %w", ErrImage, err)
 	}
 
 	return imageBytes, nil
@@ -113,7 +114,7 @@ func validateImageBytes(body []byte) error {
 	contentType := http.DetectContentType(body)
 
 	switch contentType {
-	case "image/jpeg":
+	case "image/jpeg", "image/png":
 		return nil
 	default:
 		return fmt.Errorf("invalid image content type: %s", contentType)

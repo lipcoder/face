@@ -53,6 +53,9 @@ func Init(ctx context.Context, databaseURL string) (*Store, error) {
 // Close 关闭数据库连接池。
 // 只在 main 退出时调用。
 func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	return s.db.Close()
 }
 

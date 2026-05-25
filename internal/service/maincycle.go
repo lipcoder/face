@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-const (
-	DefaultFaceInterval   = 500 * time.Millisecond
-	DefaultFaceSimilarity = 0.45
-	// DefaultFaceQuality    = 0.45	
-)
-
 // 每隔interval获取一次图像
 func SignIn(
 	ctx context.Context,
@@ -36,11 +30,11 @@ func SignIn(
 	}
 
 	if interval <= 0 {
-		interval = DefaultFaceInterval
+		return fmt.Errorf("interval cannot be nil")
 	}
 
 	if similarity <= 0 {
-		similarity = DefaultFaceSimilarity
+		return fmt.Errorf("similarity cannot be nil")
 	}
 
 	ticker := time.NewTicker(interval)
@@ -101,15 +95,12 @@ func extractBestEmbeddingFromCamera(
 	default:
 	}
 
-	embedding, err := rec.GetFaceEmbedding(imageBytes, 1)
+	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 1)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding from recognition response: %w", err)
 	}
-	if embedding == nil {
-		return nil, err
-	}
 	if len(embedding) == 0 {
-		return nil, err
+		return nil, recognition.ErrNoFaceEmbedding
 	}
 
 	return embedding[0], nil

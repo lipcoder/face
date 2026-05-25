@@ -1,6 +1,9 @@
 package recognition
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var (
 	ErrNoFace          = errors.New("face is empty")
@@ -9,6 +12,5 @@ var (
 )
 
 type Recognition interface {
-	PostImage(imgBytes []byte) ([]byte, error)
-	GetFaceEmbedding(respBody []byte, rank int) ([][]float64, error)
+	GetFaceEmbedding(ctx context.Context, imgBytes []byte, rank int) ([][]float64, error)
 }

@@ -44,19 +44,3 @@ func BytesFromResponse(respBody []byte) (*Response, error) {
 	}
 	return &result, nil
 }
-
-func GetEmbedding(respBody []byte, rank int) ([]float64, error) {
-	response, err := BytesFromResponse(respBody)
-	if err != nil {
-		return nil, err
-	}
-	return response.Faces[rank].Embedding, nil
-}
-
-func GetFaceCount(respBody []byte) (int, error) {
-	response, err := BytesFromResponse(respBody)
-	if err != nil {
-		return 0, err
-	}
-	return response.FaceCount, nil
-}

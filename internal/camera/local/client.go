@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -11,26 +12,37 @@ import (
 type Local int
 
 var (
+	ErrLocal     = errors.New("local image")
 	ErrNilCamera = errors.New("camera failed")
 	ErrNilImages = errors.New("images failed")
 )
 
-func NewLocalCamera(a int) (*Local, error)
+// 只能靠这个来创建local
+func NewLocalCamera(deviceID int) (*Local, error) {
+	cam := Local(deviceID)
+	return &cam, nil
+}
 
-func (a Local) Capture() ([]byte, error) {
-	imageBytes, err := a.getLocalImage()
+func (a Local) Capture(ctx context.Context) ([]byte, error) {
+	imageBytes, err := a.getLocalImage(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("capture local image: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrLocal, err)
 	}
 
 	return imageBytes, nil
 }
 
 // 获取本地摄像头的照片
-func (a Local) getLocalImage() ([]byte, error) {
-	webcam, err := gocv.OpenVideoCapture(a)
+func (a Local) getLocalImage(ctx context.Context) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	webcam, err := gocv.OpenVideoCapture(int(a))
 	if err != nil {
-		return nil, fmt.Errorf("%w Open local camera failed %w", ErrNilCamera, err)
+		return nil, fmt.Errorf("%w: open local camera failed: %w", ErrNilCamera, err)
 	}
 	defer webcam.Close()
 
@@ -41,24 +53,42 @@ func (a Local) getLocalImage() ([]byte, error) {
 	img := gocv.NewMat()
 	defer img.Close()
 
-	time.Sleep(500 * time.Millisecond)
+	if err := sleepContext(ctx, 500*time.Millisecond); err != nil {
+		return nil, err
+	}
 
 	var ok bool
+
 	for i := 0; i < 20; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if webcam.Read(&img) && !img.Empty() {
 			ok = true
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+
+		if err := sleepContext(ctx, 100*time.Millisecond); err != nil {
+			return nil, err
+		}
 	}
 
 	if !ok {
 		return nil, ErrNilCamera
 	}
 
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	buf, err := gocv.IMEncode(".jpg", img)
 	if err != nil {
-		return nil, fmt.Errorf("%w Encoding JPG failed %w", ErrNilImages, err)
+		return nil, fmt.Errorf("%w: encoding jpg failed: %w", ErrNilImages, err)
 	}
 	defer buf.Close()
 
@@ -70,4 +100,16 @@ func (a Local) getLocalImage() ([]byte, error) {
 	}
 
 	return imageBytes, nil
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

@@ -20,106 +20,161 @@ type AdminRequest struct {
 }
 
 type AdminResult struct {
-	action string
-	name   string
-	exists bool
-	err    error
+	Action string
+	Name   string
+	Exists bool
+	Err    error
+}
+
+func NewAddFaceRequest(
+	name string,
+	cam camera.Camera,
+	rec recognition.Recognition,
+) AdminRequest {
+	return AdminRequest{
+		name:   name,
+		action: "add",
+		cam:    cam,
+		rec:    rec,
+		Reply:  make(chan AdminResult, 1),
+	}
+}
+
+func NewDeleteFaceRequest(name string) AdminRequest {
+	return AdminRequest{
+		name:   name,
+		action: "delete",
+		Reply:  make(chan AdminResult, 1),
+	}
+}
+
+func NewSearchFaceRequest(name string) AdminRequest {
+	return AdminRequest{
+		name:   name,
+		action: "search",
+		Reply:  make(chan AdminResult, 1),
+	}
 }
 
 func StartAdminLoop(
 	ctx context.Context,
 	reqCh <-chan AdminRequest,
-	addFaceSem chan struct{},
+	addFaceSem chan int,
 	facedb data.Facedb,
 	wg *sync.WaitGroup,
 ) error {
+	if reqCh == nil {
+		return errors.New("reqCh cannot be nil")
+	}
+	if addFaceSem == nil {
+		return errors.New("addFaceSem cannot be nil")
+	}
+	if cap(addFaceSem) == 0 {
+		return errors.New("addFaceSem must be buffered")
+	}
+	if facedb == nil {
+		return errors.New("facedb cannot be nil")
+	}
+	if wg == nil {
+		return errors.New("wait group cannot be nil")
+	}
 	for {
-		if wg == nil {
-			return errors.New("wait group cannot be nil")
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
 		case req, ok := <-reqCh:
 			if !ok {
 				return nil
 			}
 			req.name = strings.TrimSpace(req.name)
-			if req.name == "" {
-				sendAdminResult(ctx, req.Reply, AdminResult{
-					name:   req.name,
-					action: req.action,
-					exists: false,
-					err:    errors.New("no name"),
-				})
-				continue
-			}
-			if req.rec == nil {
-				sendAdminResult(ctx, req.Reply, AdminResult{
-					name:   req.name,
-					action: req.action,
-					exists: false,
-					err:    errors.New("Recognition cannot be nil"),
-				})
-				continue
-			}
 
-			switch req.action {
-			case "add":
-				if req.cam == nil {
-					sendAdminResult(ctx, req.Reply, AdminResult{
-						name:   req.name,
-						action: req.action,
-						exists: false,
-						err:    errors.New("camera cannot be nil"),
-					})
-					continue
-				}
-				go handleAddFaceRequest(ctx, req, facedb, addFaceSem)
-
-			case "delete":
-				if err := facedb.DeleteFaceByName(ctx, req.name); err != nil {
-					sendAdminResult(ctx, req.Reply, AdminResult{
-						name:   req.name,
-						action: req.action,
-						exists: false,
-						err:    err,
-					})
-					continue
-				}
-				sendAdminResult(ctx, req.Reply, AdminResult{
-					name:   req.name,
-					action: req.action,
-					exists: true,
-					err:    nil,
-				})
-
-			case "search":
-				exists, err := facedb.FaceExistsByName(ctx, req.name)
-				if err != nil {
-					sendAdminResult(ctx, req.Reply, AdminResult{
-						name:   req.name,
-						action: req.action,
-						exists: exists,
-						err:    err,
-					})
-					continue
-				}
-				sendAdminResult(ctx, req.Reply, AdminResult{
-					name:   req.name,
-					action: req.action,
-					exists: exists,
-					err:    nil,
-				})
-			default:
-				sendAdminResult(ctx, req.Reply, AdminResult{
-					name:   req.name,
-					action: req.action,
-					err:    fmt.Errorf("unknown admin action: %s", req.action),
-				})
-				continue
-			}
+			wg.Add(1)
+			go func(req AdminRequest) {
+				defer wg.Done()
+				handleAdminRequest(ctx, req, facedb, addFaceSem)
+			}(req)
 		}
+	}
+}
+
+func handleAdminRequest(
+	ctx context.Context,
+	req AdminRequest,
+	facedb data.Facedb,
+	addFaceSem chan int,
+) {
+	if req.name == "" {
+		sendAdminResult(ctx, req.Reply, AdminResult{
+			Name:   req.name,
+			Action: req.action,
+			Err:    errors.New("name cannot be empty"),
+		})
+		return
+	}
+	switch req.action {
+	case "add":
+		if req.cam == nil {
+			sendAdminResult(ctx, req.Reply, AdminResult{
+				Name:   req.name,
+				Action: req.action,
+				Err:    errors.New("camera cannot be nil"),
+			})
+			return
+		}
+
+		if req.rec == nil {
+			sendAdminResult(ctx, req.Reply, AdminResult{
+				Name:   req.name,
+				Action: req.action,
+				Err:    errors.New("recognition cannot be nil"),
+			})
+			return
+		}
+		handleAddFaceRequest(ctx, req, facedb, addFaceSem)
+	case "delete":
+		err := facedb.DeleteFaceByName(ctx, req.name)
+		if err != nil {
+			sendAdminResult(ctx, req.Reply, AdminResult{
+				Name:   req.name,
+				Action: req.action,
+				Err:    err,
+			})
+			return
+		}
+
+		sendAdminResult(ctx, req.Reply, AdminResult{
+			Name:   req.name,
+			Action: req.action,
+			Exists: true,
+			Err:    nil,
+		})
+
+	case "search":
+		exists, err := facedb.FaceExistsByName(ctx, req.name)
+		if err != nil {
+			sendAdminResult(ctx, req.Reply, AdminResult{
+				Name:   req.name,
+				Action: req.action,
+				Exists: false,
+				Err:    err,
+			})
+			return
+		}
+
+		sendAdminResult(ctx, req.Reply, AdminResult{
+			Name:   req.name,
+			Action: req.action,
+			Exists: exists,
+			Err:    nil,
+		})
+
+	default:
+		sendAdminResult(ctx, req.Reply, AdminResult{
+			Name:   req.name,
+			Action: req.action,
+			Err:    fmt.Errorf("unknown admin action: %s", req.action),
+		})
 	}
 }
 
@@ -128,26 +183,26 @@ func handleAddFaceRequest(
 	ctx context.Context,
 	req AdminRequest,
 	facedb data.Facedb,
-	addFaceSem chan struct{},
+	addFaceSem chan int,
 ) {
 	select {
 	case <-ctx.Done():
 		sendAdminResult(ctx, req.Reply, AdminResult{
-			name:   req.name,
-			action: req.action,
-			err:    ctx.Err(),
+			Name:   req.name,
+			Action: req.action,
+			Err:    ctx.Err(),
 		})
 		return
-	case addFaceSem <- struct{}{}:
+	case addFaceSem <- 1:
 		defer func() {
 			<-addFaceSem
 		}()
 	}
 	_, err := addFaceFromCamera(ctx, req.name, req.cam, facedb, req.rec)
 	sendAdminResult(ctx, req.Reply, AdminResult{
-		name:   req.name,
-		action: req.action,
-		err:    err,
+		Name:   req.name,
+		Action: req.action,
+		Err:    err,
 	})
 }
 
@@ -166,7 +221,7 @@ func addFaceFromCamera(
 
 	imageBytes, err := cam.Capture(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("mainAction get image failed,%w", err)
+		return 0, fmt.Errorf("capture image: %w", err)
 	}
 
 	select {
@@ -175,7 +230,7 @@ func addFaceFromCamera(
 	default:
 	}
 
-	embedding, err := rec.GetFaceEmbedding(imageBytes, 0)
+	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 0)
 	if err != nil {
 		return 0, fmt.Errorf("get embedding from recognition response: %w", err)
 	}
@@ -196,7 +251,6 @@ func addFaceFromCamera(
 	return id, nil
 }
 
-// 返回请求
 func sendAdminResult(
 	ctx context.Context,
 	reply chan AdminResult,
@@ -207,10 +261,15 @@ func sendAdminResult(
 	}
 
 	select {
-	case <-ctx.Done():
-		return
-
 	case reply <- result:
+		return
+	default:
+	}
+
+	select {
+	case reply <- result:
+		return
+	case <-ctx.Done():
 		return
 	}
 }
