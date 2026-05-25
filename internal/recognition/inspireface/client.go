@@ -66,7 +66,7 @@ func (a Inspire) PostImage(ctx context.Context, imgBytes []byte) ([]byte, error)
 		return nil, fmt.Errorf("%w: close multipart writer failed: %w", ErrBuildImageRequest, err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, a.Config.Host, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Config.Host, &body)
 	if err != nil {
 		return nil, fmt.Errorf("%w: create request failed: %w", ErrBuildImageRequest, err)
 	}

@@ -16,6 +16,9 @@ import (
 // AddFace 添加人脸。
 // name 唯一，重复添加返回 ErrAlreadyExists。
 func (s *Store) AddFace(ctx context.Context, name string, embedding []float64) (int64, error) {
+	if err := s.check(); err != nil {
+		return 0, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return 0, errors.New("name cannot be empty")
@@ -48,6 +51,9 @@ func (s *Store) AddFace(ctx context.Context, name string, embedding []float64) (
 // DeleteFaceByName 删除指定 name 的人脸。
 // 不存在返回 ErrNotFound。
 func (s *Store) DeleteFaceByName(ctx context.Context, name string) error {
+	if err := s.check(); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("name cannot be empty")
@@ -76,6 +82,9 @@ func (s *Store) DeleteFaceByName(ctx context.Context, name string) error {
 
 // FaceExistsByName 查询指定 name 是否存在。
 func (s *Store) FaceExistsByName(ctx context.Context, name string) (bool, error) {
+	if err := s.check(); err != nil {
+		return false, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return false, errors.New("name cannot be empty")
@@ -105,6 +114,9 @@ func (s *Store) SearchFaceByEmbedding(
 	embedding []float64,
 	threshold float64,
 ) (string, float64, error) {
+	if err := s.check(); err != nil {
+		return "", 0, err
+	}
 	if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
 		return "", 0, errors.New("threshold must be a finite number")
 	}
@@ -192,4 +204,14 @@ func isUniqueViolation(err error) bool {
 	}
 
 	return false
+}
+
+func (s *Store) check() error {
+	if s == nil {
+		return errors.New("pgvector store is nil")
+	}
+	if s.db == nil {
+		return errors.New("pgvector database is nil")
+	}
+	return nil
 }

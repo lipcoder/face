@@ -55,6 +55,9 @@ var (
 )
 
 func (a *Hik) Capture(ctx context.Context) ([]byte, error) {
+	if a == nil || a.client == nil {
+		return nil, errors.New("请检查源码构建Hik的方式")
+	}
 	con := a.Config
 
 	imageBytes, err := a.getWebImage(ctx, con.Host, con.Username, con.Password)

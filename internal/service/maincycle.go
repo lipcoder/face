@@ -30,11 +30,11 @@ func SignIn(
 	}
 
 	if interval <= 0 {
-		return fmt.Errorf("interval cannot be nil")
+		return fmt.Errorf("interval must be positive")
 	}
 
 	if similarity <= 0 {
-		return fmt.Errorf("similarity cannot be nil")
+		return fmt.Errorf("similarity must be positive")
 	}
 
 	ticker := time.NewTicker(interval)
