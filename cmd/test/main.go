@@ -1,0 +1,228 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"lipcoder/face/internal/camera"
+	"lipcoder/face/internal/camera/local"
+	"lipcoder/face/internal/config"
+	"lipcoder/face/internal/data/pgvector"
+	"lipcoder/face/internal/recognition"
+	"lipcoder/face/internal/recognition/inspireface"
+	"lipcoder/face/internal/service"
+)
+
+func main() {
+
+	// 初始化日志器
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// 初始化配置
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("load config failed", "err", err)
+		os.Exit(1)
+	}
+
+	// 初始化ctx
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	// 初始化数据库
+	store, err := pgvector.Init(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("init database failed", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Error("close database failed", "err", err)
+		}
+	}()
+
+	// 初始化连接器
+	httpClient := &http.Client{
+		Timeout: 8 * time.Second,
+	}
+
+	// 初始化海康摄像头
+	cam, err := local.NewLocalCamera(0)
+	if err != nil {
+		logger.Error("init local camera failed", "err", err)
+		os.Exit(1)
+	}
+
+	// 初始化照片处理器
+	rec, err := inspireface.NewInspire(inspireface.Config{
+		Host: cfg.Inspireface.Host,
+	}, httpClient)
+	if err != nil {
+		logger.Error("init inspireface failed", "err", err)
+		os.Exit(1)
+	}
+
+	// 创建一个管理请求通道
+	reqCh := make(chan service.AdminRequest)
+	// add请求的并发限制器
+	addFaceSem := make(chan int, 2)
+
+	var adminReqWG sync.WaitGroup
+	var loopWG sync.WaitGroup
+
+	loopWG.Add(1)
+	go func() {
+		defer loopWG.Done()
+
+		err := service.StartAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("admin loop stopped with error", "err", err)
+			return
+		}
+
+		logger.Info("admin loop stopped")
+	}()
+
+	adminInputLoop(ctx, reqCh, cam, rec)
+
+	loopWG.Add(1)
+	go func() {
+		defer loopWG.Done()
+
+		err := service.SignIn(
+			ctx,
+			cam,
+			rec,
+			store,
+			500*time.Millisecond,
+			0.45,
+		)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("sign in loop stopped with error", "err", err)
+			return
+		}
+
+		logger.Info("sign in loop stopped")
+	}()
+
+	logger.Info("face service started")
+	logger.Info("press Ctrl+C to stop")
+
+	<-ctx.Done()
+
+	logger.Info("shutdown signal received")
+
+	close(reqCh)
+
+	loopWG.Wait()
+	adminReqWG.Wait()
+
+	logger.Info("face service stopped")
+}
+
+func adminInputLoop(
+	ctx context.Context,
+	reqCh chan<- service.AdminRequest,
+	cam camera.Camera,
+	rec recognition.Recognition,
+) {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Println("请选择操作：")
+		fmt.Println("1. 添加人脸")
+		fmt.Println("2. 删除人脸")
+		fmt.Println("3. 查询人脸")
+		fmt.Println("0. 退出管理，开始签到")
+		fmt.Print("> ")
+
+		op, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("读取输入失败:", err)
+			continue
+		}
+
+		op = strings.TrimSpace(op)
+
+		if op == "0" {
+			fmt.Println("退出管理模式，开始签到")
+			return
+		}
+
+		if op != "1" && op != "2" && op != "3" {
+			fmt.Println("未知操作")
+			continue
+		}
+
+		fmt.Print("请输入姓名: ")
+
+		name, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("读取姓名失败:", err)
+			continue
+		}
+
+		name = strings.TrimSpace(name)
+		if name == "" {
+			fmt.Println("姓名不能为空")
+			continue
+		}
+
+		var req service.AdminRequest
+
+		switch op {
+		case "1":
+			req = service.NewAddFaceRequest(name, cam, rec)
+
+		case "2":
+			req = service.NewDeleteFaceRequest(name)
+
+		case "3":
+			req = service.NewSearchFaceRequest(name)
+		}
+
+		select {
+		case reqCh <- req:
+		case <-ctx.Done():
+			return
+		}
+
+		select {
+		case result := <-req.Reply:
+			if result.Err != nil {
+				fmt.Println("操作失败:", result.Err)
+				continue
+			}
+
+			switch op {
+			case "1":
+				fmt.Println("添加成功:", name)
+			case "2":
+				fmt.Println("删除成功:", name)
+			case "3":
+				if result.Exists {
+					fmt.Println("查询结果: 存在", name)
+				} else {
+					fmt.Println("查询结果: 不存在", name)
+				}
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}

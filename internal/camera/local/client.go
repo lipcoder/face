@@ -40,7 +40,7 @@ func (a Local) getLocalImage(ctx context.Context) ([]byte, error) {
 	default:
 	}
 
-	webcam, err := gocv.OpenVideoCapture(int(a))
+	webcam, err := gocv.OpenVideoCaptureWithAPI(int(a), gocv.VideoCaptureV4L2)
 	if err != nil {
 		return nil, fmt.Errorf("%w: open local camera failed: %w", ErrNilCamera, err)
 	}
