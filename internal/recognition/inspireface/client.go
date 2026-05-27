@@ -79,7 +79,7 @@ func (a Inspire) PostImage(ctx context.Context, imgBytes []byte) ([]byte, error)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read response failed: %w", ErrPostImageResponse, err)
 	}

@@ -21,6 +21,7 @@ import (
 	"lipcoder/face/internal/recognition"
 	"lipcoder/face/internal/recognition/inspireface"
 	"lipcoder/face/internal/service"
+	"lipcoder/face/internal/service/lab"
 )
 
 func main() {
@@ -84,11 +85,14 @@ func main() {
 	var adminReqWG sync.WaitGroup
 	var loopWG sync.WaitGroup
 
+	// 创建检测用户行为的检测器
+	adminloop := lab.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
+
 	loopWG.Add(1)
 	go func() {
 		defer loopWG.Done()
 
-		err := service.StartAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
+		err := adminloop.StartAdminLoop()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("admin loop stopped with error", "err", err)
 			return
@@ -97,20 +101,18 @@ func main() {
 		logger.Info("admin loop stopped")
 	}()
 
-	adminInputLoop(ctx, reqCh, cam, rec)
+	// 创建用户行为的创建器
+	var r lab.Request
+	adminInputLoop(ctx, reqCh, cam, rec, r)
+
+	// 人脸识别循环检测器
+	signinloop := lab.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45)
 
 	loopWG.Add(1)
 	go func() {
 		defer loopWG.Done()
 
-		err := service.SignIn(
-			ctx,
-			cam,
-			rec,
-			store,
-			500*time.Millisecond,
-			0.45,
-		)
+		err := signinloop.StartSignIn()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("sign in loop stopped with error", "err", err)
 			return
@@ -139,6 +141,7 @@ func adminInputLoop(
 	reqCh chan<- service.AdminRequest,
 	cam camera.Camera,
 	rec recognition.Recognition,
+	r lab.Request,
 ) {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -186,13 +189,13 @@ func adminInputLoop(
 
 		switch op {
 		case "1":
-			req = service.NewAddFaceRequest(name, cam, rec)
+			req = r.NewAddFaceRequest(name, cam, rec)
 
 		case "2":
-			req = service.NewDeleteFaceRequest(name)
+			req = r.NewDeleteFaceRequest(name)
 
 		case "3":
-			req = service.NewSearchFaceRequest(name)
+			req = r.NewSearchFaceRequest(name)
 		}
 
 		select {

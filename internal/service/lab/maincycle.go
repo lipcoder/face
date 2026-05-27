@@ -1,4 +1,4 @@
-package service
+package lab
 
 import (
 	"context"
@@ -10,43 +10,67 @@ import (
 	"time"
 )
 
+type SignInLoop struct {
+	ctx        context.Context
+	cam        camera.Camera
+	rec        recognition.Recognition
+	facedb     data.Facedb
+	interval   time.Duration
+	similarity float64
+}
+
 // 每隔interval获取一次图像
-func SignIn(
+func NewSignInLoop(
 	ctx context.Context,
 	cam camera.Camera,
 	rec recognition.Recognition,
 	facedb data.Facedb,
 	interval time.Duration,
 	similarity float64,
-) error {
-	if cam == nil {
+) *SignInLoop {
+	return &SignInLoop{
+		ctx:        ctx,
+		cam:        cam,
+		rec:        rec,
+		facedb:     facedb,
+		interval:   interval,
+		similarity: similarity,
+	}
+}
+
+func (l *SignInLoop) StartSignIn() error {
+	if l == nil {
+		return fmt.Errorf("sign in loop cannot be nil")
+	}
+	if l.ctx == nil {
+		return fmt.Errorf("context cannot be nil")
+	}
+	if l.cam == nil {
 		return fmt.Errorf("camera cannot be nil")
 	}
-	if rec == nil {
+	if l.rec == nil {
 		return fmt.Errorf("recognition cannot be nil")
 	}
-	if facedb == nil {
+	if l.facedb == nil {
 		return fmt.Errorf("facedb cannot be nil")
 	}
-
-	if interval <= 0 {
+	if l.interval <= 0 {
 		return fmt.Errorf("interval must be positive")
 	}
-
-	if similarity <= 0 {
+	if l.similarity <= 0 {
 		return fmt.Errorf("similarity must be positive")
 	}
 
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-l.ctx.Done():
+			return l.ctx.Err()
 
 		case <-ticker.C:
-			bestembedding, err := extractBestEmbeddingFromCamera(ctx, cam, rec)
+			bestembedding, err := extractBestEmbeddingFromCamera(l.ctx, l.cam, l.rec)
 			if errors.Is(err, recognition.ErrNoFace) {
 				continue
 			}
@@ -57,7 +81,7 @@ func SignIn(
 				return err
 			}
 
-			name, facesimilarity, err := facedb.SearchFaceByEmbedding(ctx, bestembedding, similarity)
+			name, facesimilarity, err := l.facedb.SearchFaceByEmbedding(l.ctx, bestembedding, l.similarity)
 			if err != nil {
 				if errors.Is(err, data.ErrNotFound) {
 					continue
