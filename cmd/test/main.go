@@ -189,13 +189,13 @@ func adminInputLoop(
 
 		switch op {
 		case "1":
-			req = r.NewAddFaceRequest(name, cam, rec)
+			req = r.AddFace(name, cam, rec)
 
 		case "2":
-			req = r.NewDeleteFaceRequest(name)
+			req = r.DeleteFace(name)
 
 		case "3":
-			req = r.NewSearchFaceRequest(name)
+			req = r.SearchFace(name)
 		}
 
 		select {

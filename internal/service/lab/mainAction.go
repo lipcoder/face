@@ -76,7 +76,7 @@ func (l *AdminLoop) StartAdminLoop() error {
 type Request struct {
 }
 
-func (r Request) NewAddFaceRequest(
+func (r Request) AddFace(
 	name string,
 	cam camera.Camera,
 	rec recognition.Recognition,
@@ -90,7 +90,7 @@ func (r Request) NewAddFaceRequest(
 	}
 }
 
-func (r Request) NewDeleteFaceRequest(name string) service.AdminRequest {
+func (r Request) DeleteFace(name string) service.AdminRequest {
 	return service.AdminRequest{
 		Name:   name,
 		Action: "delete",
@@ -98,7 +98,7 @@ func (r Request) NewDeleteFaceRequest(name string) service.AdminRequest {
 	}
 }
 
-func (r Request) NewSearchFaceRequest(name string) service.AdminRequest {
+func (r Request) SearchFace(name string) service.AdminRequest {
 	return service.AdminRequest{
 		Name:   name,
 		Action: "search",

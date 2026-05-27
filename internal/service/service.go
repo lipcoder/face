@@ -26,7 +26,7 @@ type Service interface {
 }
 
 type Action interface {
-	NewAddFaceRequest(name string, cam camera.Camera, rec recognition.Recognition) AdminRequest
-	NewDeleteFaceRequest(name string) AdminRequest
-	NewSearchFaceRequest(name string) AdminRequest
+	AddFace(name string, cam camera.Camera, rec recognition.Recognition) AdminRequest
+	DeleteFace(name string) AdminRequest
+	SearchFace(name string) AdminRequest
 }
