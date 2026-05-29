@@ -21,7 +21,7 @@ import (
 	"lipcoder/face/internal/recognition"
 	"lipcoder/face/internal/recognition/inspireface"
 	"lipcoder/face/internal/service"
-	"lipcoder/face/internal/service/lab"
+	labservice "lipcoder/face/internal/service/lab"
 )
 
 func main() {
@@ -86,7 +86,7 @@ func main() {
 	var loopWG sync.WaitGroup
 
 	// 创建检测用户行为的检测器
-	adminloop := lab.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
+	adminloop := labservice.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
 
 	loopWG.Add(1)
 	go func() {
@@ -102,11 +102,11 @@ func main() {
 	}()
 
 	// 创建用户行为的创建器
-	var r lab.Request
+	var r labservice.ActionRequest
 	adminInputLoop(ctx, reqCh, cam, rec, r)
 
 	// 人脸识别循环检测器
-	signinloop := lab.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45)
+	signinloop := labservice.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45)
 
 	loopWG.Add(1)
 	go func() {
@@ -141,7 +141,7 @@ func adminInputLoop(
 	reqCh chan<- service.AdminRequest,
 	cam camera.Camera,
 	rec recognition.Recognition,
-	r lab.Request,
+	r labservice.ActionRequest,
 ) {
 	reader := bufio.NewReader(os.Stdin)
 
