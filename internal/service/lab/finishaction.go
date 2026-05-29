@@ -73,39 +73,6 @@ func (l *AdminLoop) StartAdminLoop() error {
 	}
 }
 
-type Request struct {
-}
-
-func (r Request) AddFace(
-	name string,
-	cam camera.Camera,
-	rec recognition.Recognition,
-) service.AdminRequest {
-	return service.AdminRequest{
-		Name:   name,
-		Action: "add",
-		Cam:    cam,
-		Rec:    rec,
-		Reply:  make(chan service.AdminResult, 1),
-	}
-}
-
-func (r Request) DeleteFace(name string) service.AdminRequest {
-	return service.AdminRequest{
-		Name:   name,
-		Action: "delete",
-		Reply:  make(chan service.AdminResult, 1),
-	}
-}
-
-func (r Request) SearchFace(name string) service.AdminRequest {
-	return service.AdminRequest{
-		Name:   name,
-		Action: "search",
-		Reply:  make(chan service.AdminResult, 1),
-	}
-}
-
 func handleAdminRequest(
 	ctx context.Context,
 	req service.AdminRequest,

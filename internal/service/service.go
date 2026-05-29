@@ -5,6 +5,7 @@ import (
 	"lipcoder/face/internal/recognition"
 )
 
+// 发送的请求，包含返回的channel
 type AdminRequest struct {
 	Name   string
 	Action string
@@ -13,6 +14,7 @@ type AdminRequest struct {
 	Reply  chan AdminResult
 }
 
+// 返回的内容
 type AdminResult struct {
 	Action string
 	Name   string
