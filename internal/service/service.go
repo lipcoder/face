@@ -18,6 +18,7 @@ type AdminRequest struct {
 type AdminResult struct {
 	Action string
 	Name   string
+	Names  []string
 	Exists bool
 	Err    error
 }
@@ -31,4 +32,5 @@ type Action interface {
 	AddFace(name string, cam camera.Camera, rec recognition.Recognition) AdminRequest
 	DeleteFace(name string) AdminRequest
 	SearchFace(name string) AdminRequest
+	ListFaceNames() AdminRequest
 }

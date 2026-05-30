@@ -79,17 +79,42 @@ func handleAdminRequest(
 	facedb data.Facedb,
 	addFaceSem chan int,
 ) {
-	if req.Name == "" {
+	if facedb == nil {
 		sendAdminResult(ctx, req.Reply, service.AdminResult{
 			Name:   req.Name,
 			Action: req.Action,
-			Err:    errors.New("name cannot be empty"),
+			Err:    errors.New("facedb cannot be nil"),
 		})
 		return
 	}
 
 	switch req.Action {
+	case "list":
+		names, err := facedb.ListFaceNames(ctx)
+		if err != nil {
+			sendAdminResult(ctx, req.Reply, service.AdminResult{
+				Action: req.Action,
+				Err:    err,
+			})
+			return
+		}
+
+		sendAdminResult(ctx, req.Reply, service.AdminResult{
+			Action: req.Action,
+			Names:  names,
+			Err:    nil,
+		})
+
 	case "add":
+		if req.Name == "" {
+			sendAdminResult(ctx, req.Reply, service.AdminResult{
+				Name:   req.Name,
+				Action: req.Action,
+				Err:    errors.New("name cannot be empty"),
+			})
+			return
+		}
+
 		if req.Cam == nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Name:   req.Name,
@@ -111,6 +136,15 @@ func handleAdminRequest(
 		handleAddFaceRequest(ctx, req, facedb, addFaceSem)
 
 	case "delete":
+		if req.Name == "" {
+			sendAdminResult(ctx, req.Reply, service.AdminResult{
+				Name:   req.Name,
+				Action: req.Action,
+				Err:    errors.New("name cannot be empty"),
+			})
+			return
+		}
+
 		err := facedb.DeleteFaceByName(ctx, req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
@@ -129,6 +163,15 @@ func handleAdminRequest(
 		})
 
 	case "search":
+		if req.Name == "" {
+			sendAdminResult(ctx, req.Reply, service.AdminResult{
+				Name:   req.Name,
+				Action: req.Action,
+				Err:    errors.New("name cannot be empty"),
+			})
+			return
+		}
+
 		exists, err := facedb.FaceExistsByName(ctx, req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{

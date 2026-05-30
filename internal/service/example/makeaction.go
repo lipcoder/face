@@ -38,3 +38,10 @@ func (a ActionRequest) SearchFace(name string) service.AdminRequest {
 		Reply:  make(chan service.AdminResult, 1),
 	}
 }
+
+func (a ActionRequest) ListFaceNames() service.AdminRequest {
+	return service.AdminRequest{
+		Action: "list",
+		Reply:  make(chan service.AdminResult, 1),
+	}
+}

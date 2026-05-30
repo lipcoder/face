@@ -106,6 +106,23 @@ func (h *FaceHandler) SearchFace(c *gin.Context) {
 	})
 }
 
+func (h *FaceHandler) ListFaceNames(c *gin.Context) {
+	req := h.action.ListFaceNames()
+
+	result, err := h.sendAdminRequest(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"ok":     true,
+		"action": result.Action,
+		"names":  result.Names,
+		"count":  len(result.Names),
+	})
+}
+
 func (h *FaceHandler) sendAdminRequest(
 	parent context.Context,
 	req service.AdminRequest,
@@ -191,6 +208,7 @@ func NewRouter(faceHandler *FaceHandler) *gin.Engine {
 		faces.POST("/add", faceHandler.AddFace)
 		faces.POST("/delete", faceHandler.DeleteFace)
 		faces.POST("/search", faceHandler.SearchFace)
+		faces.GET("/list", faceHandler.ListFaceNames)
 	}
 
 	return r

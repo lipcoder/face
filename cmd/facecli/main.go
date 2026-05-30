@@ -150,6 +150,7 @@ func adminInputLoop(
 		fmt.Println("1. 添加人脸")
 		fmt.Println("2. 删除人脸")
 		fmt.Println("3. 查询人脸")
+		fmt.Println("4. 输出所有人姓名列表")
 		fmt.Println("0. 退出管理，开始签到")
 		fmt.Print("> ")
 
@@ -166,36 +167,44 @@ func adminInputLoop(
 			return
 		}
 
-		if op != "1" && op != "2" && op != "3" {
+		if op != "1" && op != "2" && op != "3" && op != "4" {
 			fmt.Println("未知操作")
 			continue
 		}
 
-		fmt.Print("请输入姓名: ")
-
-		name, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("读取姓名失败:", err)
-			continue
-		}
-
-		name = strings.TrimSpace(name)
-		if name == "" {
-			fmt.Println("姓名不能为空")
-			continue
-		}
-
 		var req service.AdminRequest
+		var name string
 
 		switch op {
 		case "1":
+			name, err = readName(reader)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
 			req = r.AddFace(name, cam, rec)
 
 		case "2":
+			name, err = readName(reader)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
 			req = r.DeleteFace(name)
 
 		case "3":
+			name, err = readName(reader)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
 			req = r.SearchFace(name)
+
+		case "4":
+			req = r.ListFaceNames()
 		}
 
 		select {
@@ -222,10 +231,36 @@ func adminInputLoop(
 				} else {
 					fmt.Println("查询结果: 不存在", name)
 				}
+			case "4":
+				if len(result.Names) == 0 {
+					fmt.Println("当前没有已添加的人脸")
+					continue
+				}
+
+				fmt.Println("所有人姓名列表:")
+				for i, faceName := range result.Names {
+					fmt.Printf("%d. %s\n", i+1, faceName)
+				}
 			}
 
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func readName(reader *bufio.Reader) (string, error) {
+	fmt.Print("请输入姓名: ")
+
+	name, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("读取姓名失败: %w", err)
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("姓名不能为空")
+	}
+
+	return name, nil
 }

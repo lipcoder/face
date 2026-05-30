@@ -107,6 +107,39 @@ func (s *Store) FaceExistsByName(ctx context.Context, name string) (bool, error)
 	return exists, nil
 }
 
+// ListFaceNames 查询当前已添加的所有人脸姓名。
+func (s *Store) ListFaceNames(ctx context.Context) ([]string, error) {
+	if err := s.check(); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT name
+		FROM faces
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list face names: %w", err)
+	}
+	defer rows.Close()
+
+	names := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan face name: %w", err)
+		}
+
+		names = append(names, name)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate face names: %w", err)
+	}
+
+	return names, nil
+}
+
 // SearchFaceByEmbedding 根据 embedding 查询最相似的人脸。
 // 没有人脸、相似度低于 threshold，都返回 ErrNotFound。
 func (s *Store) SearchFaceByEmbedding(
