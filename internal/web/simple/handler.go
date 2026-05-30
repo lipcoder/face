@@ -1,4 +1,4 @@
-package lab
+package simple
 
 import (
 	"context"

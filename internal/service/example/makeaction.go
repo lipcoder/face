@@ -1,4 +1,4 @@
-package lab
+package example
 
 import (
 	"lipcoder/face/internal/camera"

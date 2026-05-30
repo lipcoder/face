@@ -16,8 +16,8 @@ import (
 	"lipcoder/face/internal/data/pgvector"
 	"lipcoder/face/internal/recognition/inspireface"
 	"lipcoder/face/internal/service"
-	labservice "lipcoder/face/internal/service/lab"
-	labweb "lipcoder/face/internal/web/lab"
+	"lipcoder/face/internal/service/example"
+	"lipcoder/face/internal/web/simple"
 )
 
 func main() {
@@ -82,7 +82,7 @@ func main() {
 	var loopWG sync.WaitGroup
 
 	// 创建检测用户行为的检测器
-	adminloop := labservice.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
+	adminloop := example.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
 
 	loopWG.Add(1)
 	go func() {
@@ -97,10 +97,10 @@ func main() {
 		logger.Info("admin loop stopped")
 	}()
 
-	var action labservice.ActionRequest
+	var action example.ActionRequest
 
 	// web
-	faceHandler := labweb.NewFaceHandler(
+	faceHandler := simple.NewFaceHandler(
 		action,
 		reqCh,
 		cam,
@@ -108,7 +108,7 @@ func main() {
 		10*time.Second,
 	)
 
-	router := labweb.NewRouter(faceHandler)
+	router := simple.NewRouter(faceHandler)
 
 	srv := &http.Server{
 		Addr:    ":5090",
