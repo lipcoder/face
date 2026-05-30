@@ -127,7 +127,7 @@ func (a Inspire) GetFaceEmbedding(ctx context.Context, imageBytes []byte, rank i
 		return embeddings, nil
 	case 0:
 		// 只允许图片里有一张脸
-		if len(response.Faces) != 1 {
+		if response.FaceCount != 1 || len(response.Faces) != 1 {
 			return nil, recognition.ErrNotOneFace
 		}
 
