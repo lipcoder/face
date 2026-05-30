@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -111,9 +110,19 @@ func main() {
 
 	router := labweb.NewRouter(faceHandler)
 
-	if err := router.Run(":5090"); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    ":5090",
+		Handler: router,
 	}
+
+	loopWG.Add(1)
+	go func() {
+		defer loopWG.Done()
+		logger.Info("web server starting", "addr", ":5090")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("web server failed", "err", err)
+		}
+	}()
 
 	logger.Info("face service started")
 	logger.Info("press Ctrl+C to stop")
@@ -121,6 +130,13 @@ func main() {
 	<-ctx.Done()
 
 	logger.Info("shutdown signal received")
+
+	// 优雅关闭 web 服务器
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("web server shutdown error", "err", err)
+	}
 
 	close(reqCh)
 

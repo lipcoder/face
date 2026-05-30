@@ -176,7 +176,9 @@ func writeError(c *gin.Context, err error) {
 }
 
 func NewRouter(faceHandler *FaceHandler) *gin.Engine {
-	r := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
 
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
