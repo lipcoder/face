@@ -16,13 +16,13 @@ type Local struct {
 }
 
 func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
-	if ctx == nil || deviceID <= 0 {
+	if ctx == nil || deviceID < 0 {
 		return nil, camera.ErrInvalidConfig
 	}
 	// 打开本地摄像头
 	localcam, err := gocv.OpenVideoCaptureWithAPI(deviceID, gocv.VideoCaptureV4L2)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open local camera failed: %w", camera.ErrInvalidConfig, err)
+		return nil, fmt.Errorf("%w: open local camera failed: %w", camera.ErrUnavailable, err)
 	}
 	if !localcam.IsOpened() {
 		localcam.Close()
@@ -56,13 +56,18 @@ func (local *Local) Capture() ([]byte, error) {
 
 func (l *Local) capture() ([]byte, error) {
 	// 检查构建是否正确
-	if l == nil || l.ctx == nil || l.deviceID < 0 {
+	if l == nil || l.ctx == nil || l.deviceID < 0 || !l.localcam.IsOpened() {
 		return nil, camera.ErrInvalidState
 	}
 
 	// 创建一个空的 OpenCV Mat 容器
 	imgcv := gocv.NewMat()
 	defer imgcv.Close()
+
+	ok := l.localcam.Read(&imgcv)
+	if !ok || imgcv.Empty() {
+		return nil, camera.ErrInvalidImage
+	}
 
 	select {
 	case <-l.ctx.Done():

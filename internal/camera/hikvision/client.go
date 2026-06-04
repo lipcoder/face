@@ -10,38 +10,47 @@ import (
 )
 
 type Hikvision struct {
-	client   *http.Client
-	ctx      context.Context
-	url      string
-	username string
-	passwd   string
+	client       *http.Client
+	ctx          context.Context
+	url          string
+	username     string
+	passwd       string
+	maxImageSize int64
 }
 
-func NewHikvison(client *http.Client, ctx context.Context, url string, name string, passwd string) (*Hikvision, error) {
-	if client == nil || ctx == nil || url == "" || name == "" || passwd == "" {
+func NewHikvision(
+	client *http.Client,
+	ctx context.Context,
+	url string,
+	name string,
+	passwd string,
+	maxImageSize int64,
+) (*Hikvision, error) {
+	if client == nil || ctx == nil || url == "" || name == "" || passwd == "" || maxImageSize <= 0 || client.Timeout <= 0{
 		return nil, camera.ErrInvalidConfig
 	}
 
 	return &Hikvision{
-		client:   client,
-		ctx:      ctx,
-		url:      url,
-		username: name,
-		passwd:   passwd,
+		client:       client,
+		ctx:          ctx,
+		url:          url,
+		username:     name,
+		passwd:       passwd,
+		maxImageSize: maxImageSize,
 	}, nil
 }
 
 func (hik *Hikvision) Capture() ([]byte, error) {
 	imageBytes, err := hik.capture()
 	if err != nil {
-		return nil, fmt.Errorf("hikvison: %w", err)
+		return nil, fmt.Errorf("hikvision: %w", err)
 	}
-	return imageBytes, err
+	return imageBytes, nil
 }
 
 func (hik *Hikvision) capture() ([]byte, error) {
 	// 检查构建是否正确
-	if hik.client == nil || hik.ctx == nil || hik.url == "" || hik.username == "" || hik.passwd == "" {
+	if hik == nil || hik.client == nil || hik.ctx == nil || hik.url == "" || hik.username == "" || hik.passwd == "" || hik.client.Timeout <= 0{
 		return nil, camera.ErrInvalidState
 	}
 
@@ -75,9 +84,10 @@ func (hik *Hikvision) capture() ([]byte, error) {
 			string(body),
 		)
 	}
-	
+
 	// 判断响应体
-	imageBytes, err := io.ReadAll(resp.Body)
+	reader := io.LimitReader(resp.Body, hik.maxImageSize+1)
+	imageBytes, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("%w: read response body failed: %w", camera.ErrRequestFailed, err) // 可能是网络波动等原因
 	}
