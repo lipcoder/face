@@ -114,7 +114,7 @@ func extractBestEmbeddingFromCamera(
 	default:
 	}
 
-	imageBytes, err := cam.Capture(ctx)
+	imageBytes, err := cam.Capture()
 	if err != nil {
 		return nil, fmt.Errorf("mainCycle get image failed,%w", err)
 	}

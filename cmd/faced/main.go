@@ -58,7 +58,7 @@ func main() {
 	}
 
 	// 初始化摄像头
-	cam, err := local.NewLocalCamera(0)
+	cam, err := local.NewLocal(ctx, 0)
 	if err != nil {
 		logger.Error("init local camera failed", "err", err)
 		os.Exit(1)

@@ -2,114 +2,88 @@ package local
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"lipcoder/face/internal/camera"
 	"time"
 
 	"gocv.io/x/gocv"
 )
 
-type Local int
-
-var (
-	ErrLocal     = errors.New("local image")
-	ErrNilCamera = errors.New("camera failed")
-	ErrNilImages = errors.New("images failed")
-)
-
-// 只能靠这个来创建local
-func NewLocalCamera(deviceID int) (*Local, error) {
-	cam := Local(deviceID)
-	return &cam, nil
+type Local struct {
+	ctx      context.Context
+	deviceID int
+	localcam *gocv.VideoCapture
 }
 
-func (a Local) Capture(ctx context.Context) ([]byte, error) {
-	imageBytes, err := a.getLocalImage(ctx)
+func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
+	if ctx == nil || deviceID <= 0 {
+		return nil, camera.ErrInvalidConfig
+	}
+	// 打开本地摄像头
+	localcam, err := gocv.OpenVideoCaptureWithAPI(deviceID, gocv.VideoCaptureV4L2)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrLocal, err)
+		return nil, fmt.Errorf("%w: open local camera failed: %w", camera.ErrInvalidConfig, err)
+	}
+	if !localcam.IsOpened() {
+		localcam.Close()
+		return nil, camera.ErrInvalidConfig
+	}
+	time.Sleep(500 * time.Millisecond) // 预热500ms
+
+	return &Local{
+		ctx:      ctx,
+		deviceID: deviceID,
+		localcam: localcam,
+	}, nil
+}
+
+func (l *Local) Close() {
+	if l == nil || l.localcam == nil {
+		return
 	}
 
-	return imageBytes, nil
+	l.localcam.Close()
+	l.localcam = nil
 }
 
-// 获取本地摄像头的照片
-func (a Local) getLocalImage(ctx context.Context) ([]byte, error) {
+func (local *Local) Capture() ([]byte, error) {
+	imageBytes, err := local.capture()
+	if err != nil {
+		return nil, fmt.Errorf("local: %w", err)
+	}
+	return imageBytes, err
+}
+
+func (l *Local) capture() ([]byte, error) {
+	// 检查构建是否正确
+	if l == nil || l.ctx == nil || l.deviceID < 0 {
+		return nil, camera.ErrInvalidState
+	}
+
+	// 创建一个空的 OpenCV Mat 容器
+	imgcv := gocv.NewMat()
+	defer imgcv.Close()
+
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-l.ctx.Done():
+		return nil, l.ctx.Err()
 	default:
 	}
 
-	webcam, err := gocv.OpenVideoCaptureWithAPI(int(a), gocv.VideoCaptureV4L2)
+	// 将 OpenCV Mat 图像矩阵编码成一张 JPG 图片的二进制数据
+	image, err := gocv.IMEncode(".jpg", imgcv)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open local camera failed: %w", ErrNilCamera, err)
+		return nil, fmt.Errorf("%w: encoding jpg failed: %w", camera.ErrInvalidImage, err)
 	}
-	defer webcam.Close()
+	defer image.Close()
 
-	if !webcam.IsOpened() {
-		return nil, ErrNilCamera
-	}
-
-	img := gocv.NewMat()
-	defer img.Close()
-
-	if err := sleepContext(ctx, 500*time.Millisecond); err != nil {
-		return nil, err
-	}
-
-	var ok bool
-
-	for i := 0; i < 20; i++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		if webcam.Read(&img) && !img.Empty() {
-			ok = true
-			break
-		}
-
-		if err := sleepContext(ctx, 100*time.Millisecond); err != nil {
-			return nil, err
-		}
-	}
-
-	if !ok {
-		return nil, ErrNilCamera
-	}
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	buf, err := gocv.IMEncode(".jpg", img)
-	if err != nil {
-		return nil, fmt.Errorf("%w: encoding jpg failed: %w", ErrNilImages, err)
-	}
-	defer buf.Close()
-
-	imageBytes := make([]byte, len(buf.GetBytes()))
-	copy(imageBytes, buf.GetBytes())
+	// 关闭之后，它内部的内存可能不能再安全使用，所以复制一份出来
+	imageBytes := make([]byte, len(image.GetBytes()))
+	copy(imageBytes, image.GetBytes())
 
 	if len(imageBytes) == 0 {
-		return nil, ErrNilImages
+		return nil, camera.ErrInvalidImage
 	}
 
 	return imageBytes, nil
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }

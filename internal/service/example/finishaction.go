@@ -242,7 +242,7 @@ func addFaceFromCamera(
 	default:
 	}
 
-	imageBytes, err := cam.Capture(ctx)
+	imageBytes, err := cam.Capture()
 	if err != nil {
 		return 0, fmt.Errorf("capture image: %w", err)
 	}

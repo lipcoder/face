@@ -5,121 +5,89 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lipcoder/face/internal/camera"
 	"net/http"
-	"time"
 )
 
-type Hik struct {
-	client *http.Client
-	Config
+type Hikvision struct {
+	client   *http.Client
+	ctx      context.Context
+	url      string
+	username string
+	passwd   string
 }
 
-type Config struct {
-	Host     string
-	Username string
-	Password string
-}
-
-func NewHik(cfg Config, client *http.Client) (*Hik, error) {
-	if cfg.Host == "" {
-		return nil, errors.New("hikvision host cannot be empty")
-	}
-	if cfg.Username == "" {
-		return nil, errors.New("hikvision username cannot be empty")
-	}
-	if cfg.Password == "" {
-		return nil, errors.New("hikvision password cannot be empty")
+func NewHikvison(client *http.Client, ctx context.Context, url string, name string, passwd string) (*Hikvision, error) {
+	if client == nil || ctx == nil || url == "" || name == "" || passwd == "" {
+		return nil, camera.ErrInvalidConfig
 	}
 
-	if client == nil {
-		client = &http.Client{
-			Timeout: 5 * time.Second,
-		}
-	} else if client.Timeout == 0 {
-		copied := *client
-		copied.Timeout = 5 * time.Second
-		client = &copied
-	}
-
-	return &Hik{
-		client: client,
-		Config: cfg,
+	return &Hikvision{
+		client:   client,
+		ctx:      ctx,
+		url:      url,
+		username: name,
+		passwd:   passwd,
 	}, nil
 }
 
-var (
-	ErrHik     = errors.New("hik image")
-	ErrUrl     = errors.New("url failed")
-	ErrRequest = errors.New("request failed")
-	ErrImage   = errors.New("image failed")
-)
-
-func (a *Hik) Capture(ctx context.Context) ([]byte, error) {
-	if a == nil || a.client == nil {
-		return nil, errors.New("请检查源码构建Hik的方式")
-	}
-	con := a.Config
-
-	imageBytes, err := a.getWebImage(ctx, con.Host, con.Username, con.Password)
+func (hik *Hikvision) Capture() ([]byte, error) {
+	imageBytes, err := hik.capture()
 	if err != nil {
-		return nil, fmt.Errorf("capture hikvision image: %w", err)
+		return nil, fmt.Errorf("hikvison: %w", err)
 	}
-
-	return imageBytes, nil
+	return imageBytes, err
 }
 
-func (a *Hik) getWebImage(ctx context.Context, URL, username, passwd string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%w create request failed: %w", ErrUrl, err)
+func (hik *Hikvision) capture() ([]byte, error) {
+	// 检查构建是否正确
+	if hik.client == nil || hik.ctx == nil || hik.url == "" || hik.username == "" || hik.passwd == "" {
+		return nil, camera.ErrInvalidState
 	}
 
-	req.SetBasicAuth(username, passwd)
-
-	resp, err := a.client.Do(req)
+	// 创建请求
+	req, err := http.NewRequestWithContext(hik.ctx, http.MethodGet, hik.url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w send request failed: %w", ErrRequest, err)
+		return nil, fmt.Errorf("%w: create request failed: %w", camera.ErrInvalidConfig, err)
+	}
+	req.SetBasicAuth(hik.username, hik.passwd) // 请求要带上账号密码
+
+	// 发送请求
+	resp, err := hik.client.Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("%w: send request failed: %w", camera.ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 
-	contentType := resp.Header.Get("Content-Type")
-
+	// 判断响应头
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 
 		return nil, fmt.Errorf(
-			"%w: status=%d, contentType=%s, body=%s",
-			ErrRequest,
+			"%w: status=%d,contentType=%s,body=%s",
+			camera.ErrRequestFailed,
 			resp.StatusCode,
-			contentType,
+			resp.Header.Get("Content-Type"),
 			string(body),
 		)
 	}
-
-	// ErrImage
+	
+	// 判断响应体
 	imageBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read body failed: %w", ErrImage, err)
+		return nil, fmt.Errorf("%w: read response body failed: %w", camera.ErrRequestFailed, err) // 可能是网络波动等原因
 	}
-
-	if err = validateImageBytes(imageBytes); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrImage, err)
+	if len(imageBytes) == 0 {
+		return nil, camera.ErrInvalidImage // 检查是否为空照片空帧
+	}
+	contentType := http.DetectContentType(imageBytes)
+	if contentType != "image/jpeg" && contentType != "image/png" {
+		return nil, camera.ErrUnsupportedImageFormat // 检查返回的照片格式是否被支持
 	}
 
 	return imageBytes, nil
-}
-
-func validateImageBytes(body []byte) error {
-	if len(body) == 0 {
-		return errors.New("empty image body")
-	}
-
-	contentType := http.DetectContentType(body)
-
-	switch contentType {
-	case "image/jpeg", "image/png":
-		return nil
-	default:
-		return fmt.Errorf("invalid image content type: %s", contentType)
-	}
 }
