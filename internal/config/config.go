@@ -1,16 +1,16 @@
 package config
 
 import (
+	"fmt"
 	"os"
-
-	"github.com/joho/godotenv"
+	"strings"
 )
 
 type Config struct {
 	DatabaseURL string
-
-	Hikvision   HikvisionConfig
-	Inspireface InspirefaceConfig
+	Hikvision    HikvisionConfig
+	Inspireface  InspirefaceConfig
+	SignInRecord SignInRecordConfig
 }
 
 type HikvisionConfig struct {
@@ -23,20 +23,52 @@ type InspirefaceConfig struct {
 	Host string
 }
 
-func Load() (Config, error) {
-	_ = godotenv.Load(".env")
+type SignInRecordConfig struct {
+	SignInDatabaseURL string
+}
 
+func Load() (Config, error) {
 	cfg := Config{
-		DatabaseURL: os.Getenv("DATABASE_URL"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+
 		Hikvision: HikvisionConfig{
-			Host:     os.Getenv("HIKVISION_HOST"),
-			Username: os.Getenv("HIKVISION_USERNAME"),
-			Password: os.Getenv("HIKVISION_PASSWORD"),
+			Host:     getEnv("HIKVISION_HOST", ""),
+			Username: getEnv("HIKVISION_USERNAME", ""),
+			Password: getEnv("HIKVISION_PASSWORD", ""),
 		},
+
 		Inspireface: InspirefaceConfig{
-			Host: os.Getenv("INSPIREFACE_HOST"),
+			Host: getEnv("INSPIREFACE_HOST", ""),
+		},
+
+		SignInRecord: SignInRecordConfig{
+			SignInDatabaseURL: getEnv("SIGNIN_DATABASE_URL", ""),
 		},
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+
 	return cfg, nil
+}
+
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL cannot be empty")
+	}
+
+	if strings.TrimSpace(c.SignInRecord.SignInDatabaseURL) == "" {
+		return fmt.Errorf("SIGNIN_DATABASE_URL cannot be empty")
+	}
+
+	return nil
+}
+
+func getEnv(key string, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }

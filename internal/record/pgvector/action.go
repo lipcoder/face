@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"lipcoder/face/internal/data"
+	"lipcoder/face/internal/record"
 	"math"
 	"strconv"
 	"strings"
@@ -39,7 +39,7 @@ func (s *Store) AddFace(ctx context.Context, name string, embedding []float64) (
 
 	if err != nil {
 		if isUniqueViolation(err) {
-			return 0, fmt.Errorf("%w: %s", data.ErrAlreadyExists, name)
+			return 0, fmt.Errorf("%w: %s", record.ErrAlreadyExists, name)
 		}
 
 		return 0, fmt.Errorf("add face: %w", err)
@@ -74,7 +74,7 @@ func (s *Store) DeleteFaceByName(ctx context.Context, name string) error {
 	}
 
 	if affected == 0 {
-		return fmt.Errorf("%w: %s", data.ErrNotFound, name)
+		return fmt.Errorf("%w: %s", record.ErrNotFound, name)
 	}
 
 	return nil
@@ -186,7 +186,7 @@ func (s *Store) SearchFaceByEmbedding(
 	)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", 0, data.ErrNotFound
+		return "", 0, record.ErrNotFound
 	}
 
 	if err != nil {

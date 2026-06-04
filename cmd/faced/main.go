@@ -13,7 +13,7 @@ import (
 
 	"lipcoder/face/internal/camera/local"
 	"lipcoder/face/internal/config"
-	"lipcoder/face/internal/data/pgvector"
+	"lipcoder/face/internal/record/pgvector"
 	"lipcoder/face/internal/recognition/inspireface"
 	"lipcoder/face/internal/service"
 	"lipcoder/face/internal/service/example"

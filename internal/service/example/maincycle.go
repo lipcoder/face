@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"lipcoder/face/internal/camera"
-	"lipcoder/face/internal/data"
 	"lipcoder/face/internal/recognition"
+	"lipcoder/face/internal/record"
 	"time"
 )
 
@@ -14,9 +14,10 @@ type SignInLoop struct {
 	ctx        context.Context
 	cam        camera.Camera
 	rec        recognition.Recognition
-	facedb     data.Facedb
+	facedb     record.Facedb
 	interval   time.Duration
 	similarity float64
+	record     record.Record
 }
 
 // 每隔interval获取一次图像
@@ -24,9 +25,10 @@ func NewSignInLoop(
 	ctx context.Context,
 	cam camera.Camera,
 	rec recognition.Recognition,
-	facedb data.Facedb,
+	facedb record.Facedb,
 	interval time.Duration,
 	similarity float64,
+	record record.Record,
 ) *SignInLoop {
 	return &SignInLoop{
 		ctx:        ctx,
@@ -35,6 +37,7 @@ func NewSignInLoop(
 		facedb:     facedb,
 		interval:   interval,
 		similarity: similarity,
+		record:     record,
 	}
 }
 
@@ -60,6 +63,9 @@ func (l *SignInLoop) StartSignIn() error {
 	if l.similarity <= 0 {
 		return fmt.Errorf("similarity must be positive")
 	}
+	if l.record == nil {
+		return fmt.Errorf("record cannot be nil")
+	}
 
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
@@ -83,13 +89,13 @@ func (l *SignInLoop) StartSignIn() error {
 
 			name, facesimilarity, err := l.facedb.SearchFaceByEmbedding(l.ctx, bestembedding, l.similarity)
 			if err != nil {
-				if errors.Is(err, data.ErrNotFound) {
+				if errors.Is(err, record.ErrNotFound) {
 					continue
 				}
 				return fmt.Errorf("attendance search face failed %w", err)
 			}
 
-			err = RecordFaceSimilarity(name, facesimilarity)
+			err = l.record.RecordSignLog(name, facesimilarity)
 			if err != nil {
 				return fmt.Errorf("write attendance record file %w", err)
 			}

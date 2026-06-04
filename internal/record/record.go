@@ -1,8 +1,9 @@
-package data
+package record
 
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -20,4 +21,14 @@ type Facedb interface {
 		embedding []float64,
 		threshold float64,
 	) (string, float64, error)
+}
+
+type SignLog struct {
+	Name           string
+	FaceSimilarity float64
+	RecognizedAt   time.Time
+}
+
+type Record interface {
+	RecordSignLog(name string, faceSimilarity float64) error
 }

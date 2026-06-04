@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"lipcoder/face/internal/camera"
-	"lipcoder/face/internal/data"
 	"lipcoder/face/internal/recognition"
+	"lipcoder/face/internal/record"
 	"lipcoder/face/internal/service"
 	"strings"
 	"sync"
@@ -16,7 +16,7 @@ type AdminLoop struct {
 	ctx        context.Context
 	reqCh      <-chan service.AdminRequest
 	addFaceSem chan int
-	facedb     data.Facedb
+	facedb     record.Facedb
 	wg         *sync.WaitGroup
 }
 
@@ -24,7 +24,7 @@ func NewAdminLoop(
 	ctx context.Context,
 	reqCh <-chan service.AdminRequest,
 	addFaceSem chan int,
-	facedb data.Facedb,
+	facedb record.Facedb,
 	wg *sync.WaitGroup,
 ) *AdminLoop {
 	return &AdminLoop{
@@ -76,7 +76,7 @@ func (l *AdminLoop) StartAdminLoop() error {
 func handleAdminRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb data.Facedb,
+	facedb record.Facedb,
 	addFaceSem chan int,
 ) {
 	if facedb == nil {
@@ -203,7 +203,7 @@ func handleAdminRequest(
 func handleAddFaceRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb data.Facedb,
+	facedb record.Facedb,
 	addFaceSem chan int,
 ) {
 	select {
@@ -233,7 +233,7 @@ func addFaceFromCamera(
 	ctx context.Context,
 	name string,
 	cam camera.Camera,
-	facedb data.Facedb,
+	facedb record.Facedb,
 	rec recognition.Recognition,
 ) (int64, error) {
 	select {
@@ -264,8 +264,8 @@ func addFaceFromCamera(
 
 	id, err := facedb.AddFace(ctx, name, embedding[0])
 	if err != nil {
-		if errors.Is(err, data.ErrAlreadyExists) {
-			return 0, data.ErrAlreadyExists
+		if errors.Is(err, record.ErrAlreadyExists) {
+			return 0, record.ErrAlreadyExists
 		}
 
 		return 0, fmt.Errorf("add face to database: %w", err)
