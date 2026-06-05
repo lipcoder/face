@@ -51,12 +51,12 @@ func (local *Local) Capture() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("local: %w", err)
 	}
-	return imageBytes, err
+	return imageBytes, nil
 }
 
 func (l *Local) capture() ([]byte, error) {
 	// 检查构建是否正确
-	if l == nil || l.ctx == nil || l.deviceID < 0 || !l.localcam.IsOpened() {
+	if l == nil || l.ctx == nil || l.deviceID < 0 || l.localcam == nil || !l.localcam.IsOpened() {
 		return nil, camera.ErrInvalidState
 	}
 
