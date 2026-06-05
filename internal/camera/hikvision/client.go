@@ -26,7 +26,7 @@ func NewHikvision(
 	passwd string,
 	maxImageSize int64,
 ) (*Hikvision, error) {
-	if client == nil || ctx == nil || url == "" || name == "" || passwd == "" || maxImageSize <= 0 || client.Timeout <= 0{
+	if client == nil || ctx == nil || url == "" || name == "" || passwd == "" || maxImageSize <= 0 || client.Timeout <= 0 {
 		return nil, camera.ErrInvalidConfig
 	}
 
@@ -50,7 +50,7 @@ func (hik *Hikvision) Capture() ([]byte, error) {
 
 func (hik *Hikvision) capture() ([]byte, error) {
 	// 检查构建是否正确
-	if hik == nil || hik.client == nil || hik.ctx == nil || hik.url == "" || hik.username == "" || hik.passwd == "" || hik.client.Timeout <= 0{
+	if hik == nil || hik.client == nil || hik.ctx == nil || hik.url == "" || hik.username == "" || hik.passwd == "" || hik.client.Timeout <= 0 {
 		return nil, camera.ErrInvalidState
 	}
 
@@ -88,6 +88,9 @@ func (hik *Hikvision) capture() ([]byte, error) {
 	// 判断响应体
 	reader := io.LimitReader(resp.Body, hik.maxImageSize+1)
 	imageBytes, err := io.ReadAll(reader)
+	if int64(len(imageBytes)) > hik.maxImageSize {
+		return nil, camera.ErrImageTooLarge
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: read response body failed: %w", camera.ErrRequestFailed, err) // 可能是网络波动等原因
 	}

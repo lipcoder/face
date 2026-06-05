@@ -28,7 +28,13 @@ func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
 		localcam.Close()
 		return nil, camera.ErrInvalidConfig
 	}
-	time.Sleep(500 * time.Millisecond) // 预热500ms
+
+	select {
+	case <-time.After(500 * time.Millisecond): // 等待摄像头稳定
+	case <-ctx.Done():
+		localcam.Close()
+		return nil, ctx.Err()
+	}
 
 	return &Local{
 		ctx:      ctx,
@@ -37,13 +43,13 @@ func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
 	}, nil
 }
 
-func (l *Local) Close() {
-	if l == nil || l.localcam == nil {
+func (local *Local) Close() {
+	if local == nil || local.localcam == nil {
 		return
 	}
 
-	l.localcam.Close()
-	l.localcam = nil
+	local.localcam.Close()
+	local.localcam = nil
 }
 
 func (local *Local) Capture() ([]byte, error) {
@@ -54,9 +60,9 @@ func (local *Local) Capture() ([]byte, error) {
 	return imageBytes, nil
 }
 
-func (l *Local) capture() ([]byte, error) {
+func (local *Local) capture() ([]byte, error) {
 	// 检查构建是否正确
-	if l == nil || l.ctx == nil || l.deviceID < 0 || l.localcam == nil || !l.localcam.IsOpened() {
+	if local == nil || local.ctx == nil || local.deviceID < 0 || local.localcam == nil || !local.localcam.IsOpened() {
 		return nil, camera.ErrInvalidState
 	}
 
@@ -64,14 +70,14 @@ func (l *Local) capture() ([]byte, error) {
 	imgcv := gocv.NewMat()
 	defer imgcv.Close()
 
-	ok := l.localcam.Read(&imgcv)
+	ok := local.localcam.Read(&imgcv)
 	if !ok || imgcv.Empty() {
 		return nil, camera.ErrInvalidImage
 	}
 
 	select {
-	case <-l.ctx.Done():
-		return nil, l.ctx.Err()
+	case <-local.ctx.Done():
+		return nil, local.ctx.Err()
 	default:
 	}
 
