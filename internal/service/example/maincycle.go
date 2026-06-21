@@ -14,7 +14,7 @@ type SignInLoop struct {
 	ctx        context.Context
 	cam        camera.Camera
 	rec        recognition.Recognition
-	facedb     record.Facedb
+	facedb     record.FaceDB
 	interval   time.Duration
 	similarity float64
 	record     record.Record
@@ -25,7 +25,7 @@ func NewSignInLoop(
 	ctx context.Context,
 	cam camera.Camera,
 	rec recognition.Recognition,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	interval time.Duration,
 	similarity float64,
 	record record.Record,
@@ -87,7 +87,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return err
 			}
 
-			name, facesimilarity, err := l.facedb.SearchFaceByEmbedding(l.ctx, bestembedding, l.similarity)
+			match, err := l.facedb.SearchFaceByEmbedding(bestembedding, l.similarity)
 			if err != nil {
 				if errors.Is(err, record.ErrNotFound) {
 					continue
@@ -95,7 +95,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return fmt.Errorf("attendance search face failed %w", err)
 			}
 
-			err = l.record.RecordSignLog(name, facesimilarity)
+			err = l.record.RecordSignLog(match.ID, match.Similarity)
 			if err != nil {
 				return fmt.Errorf("write attendance record file %w", err)
 			}
@@ -125,7 +125,7 @@ func extractBestEmbeddingFromCamera(
 	default:
 	}
 
-	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 1)
+	embedding, err := rec.GetBestFaceEmbedding(ctx, imageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding from recognition response: %w", err)
 	}
@@ -133,5 +133,5 @@ func extractBestEmbeddingFromCamera(
 		return nil, recognition.ErrNoFaceEmbedding
 	}
 
-	return embedding[0], nil
+	return embedding, nil
 }

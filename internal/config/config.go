@@ -8,9 +8,8 @@ import (
 
 type Config struct {
 	DatabaseURL string
-	Hikvision    HikvisionConfig
-	Inspireface  InspirefaceConfig
-	SignInRecord SignInRecordConfig
+	Hikvision   HikvisionConfig
+	Inspireface InspirefaceConfig
 }
 
 type HikvisionConfig struct {
@@ -21,10 +20,6 @@ type HikvisionConfig struct {
 
 type InspirefaceConfig struct {
 	Host string
-}
-
-type SignInRecordConfig struct {
-	SignInDatabaseURL string
 }
 
 func Load() (Config, error) {
@@ -40,10 +35,6 @@ func Load() (Config, error) {
 		Inspireface: InspirefaceConfig{
 			Host: getEnv("INSPIREFACE_HOST", ""),
 		},
-
-		SignInRecord: SignInRecordConfig{
-			SignInDatabaseURL: getEnv("SIGNIN_DATABASE_URL", ""),
-		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -56,10 +47,6 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL cannot be empty")
-	}
-
-	if strings.TrimSpace(c.SignInRecord.SignInDatabaseURL) == "" {
-		return fmt.Errorf("SIGNIN_DATABASE_URL cannot be empty")
 	}
 
 	return nil

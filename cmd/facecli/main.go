@@ -18,9 +18,8 @@ import (
 	"lipcoder/face/internal/camera/local"
 	"lipcoder/face/internal/config"
 	"lipcoder/face/internal/recognition"
-	"lipcoder/face/internal/recognition/inspireface"
+	"lipcoder/face/internal/recognition/ins"
 	"lipcoder/face/internal/record/pgvector"
-	"lipcoder/face/internal/record/signinrecord"
 	"lipcoder/face/internal/service"
 	"lipcoder/face/internal/service/example"
 )
@@ -70,9 +69,7 @@ func main() {
 	}
 
 	// 初始化照片处理器
-	rec, err := inspireface.NewInspire(inspireface.Config{
-		Host: cfg.Inspireface.Host,
-	}, httpClient)
+	rec, err := ins.NewInspire(httpClient, ctx, cfg.Inspireface.Host, 20<<20)
 	if err != nil {
 		logger.Error("init inspireface failed", "err", err)
 		os.Exit(1)
@@ -102,22 +99,12 @@ func main() {
 		logger.Info("admin loop stopped")
 	}()
 
-	signinRecorder, err := signinrecord.New(signinrecord.Config{
-		DatabaseURL: cfg.SignInRecord.SignInDatabaseURL,
-		Timeout:     5 * time.Second,
-	})
-	if err != nil {
-		logger.Error("init signin recorder failed", "err", err)
-		os.Exit(1)
-	}
-	defer signinRecorder.Close()
-
 	// 创建用户行为的创建器
 	var r example.ActionRequest
 	adminInputLoop(ctx, reqCh, cam, rec, r)
 
 	// 人脸识别循环检测器
-	signinloop := example.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45, signinRecorder)
+	signinloop := example.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45, store)
 
 	loopWG.Add(1)
 	go func() {

@@ -1,4 +1,8 @@
-InspireFace/
 build*/
 .env
 data/
+.cache/
+run.sh
+
+# macOS
+.DS_Store

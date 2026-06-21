@@ -13,8 +13,8 @@ import (
 
 	"lipcoder/face/internal/camera/local"
 	"lipcoder/face/internal/config"
+	"lipcoder/face/internal/recognition/ins"
 	"lipcoder/face/internal/record/pgvector"
-	"lipcoder/face/internal/recognition/inspireface"
 	"lipcoder/face/internal/service"
 	"lipcoder/face/internal/service/example"
 	"lipcoder/face/internal/web/simple"
@@ -65,9 +65,7 @@ func main() {
 	}
 
 	// 初始化照片处理器
-	rec, err := inspireface.NewInspire(inspireface.Config{
-		Host: cfg.Inspireface.Host,
-	}, httpClient)
+	rec, err := ins.NewInspire(httpClient, ctx, cfg.Inspireface.Host, 20<<20)
 	if err != nil {
 		logger.Error("init inspireface failed", "err", err)
 		os.Exit(1)

@@ -16,7 +16,7 @@ type AdminLoop struct {
 	ctx        context.Context
 	reqCh      <-chan service.AdminRequest
 	addFaceSem chan int
-	facedb     record.Facedb
+	facedb     record.FaceDB
 	wg         *sync.WaitGroup
 }
 
@@ -24,7 +24,7 @@ func NewAdminLoop(
 	ctx context.Context,
 	reqCh <-chan service.AdminRequest,
 	addFaceSem chan int,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	wg *sync.WaitGroup,
 ) *AdminLoop {
 	return &AdminLoop{
@@ -76,7 +76,7 @@ func (l *AdminLoop) StartAdminLoop() error {
 func handleAdminRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	addFaceSem chan int,
 ) {
 	if facedb == nil {
@@ -90,7 +90,7 @@ func handleAdminRequest(
 
 	switch req.Action {
 	case "list":
-		names, err := facedb.ListFaceNames(ctx)
+		names, err := facedb.ListFaceNames()
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Action: req.Action,
@@ -145,7 +145,7 @@ func handleAdminRequest(
 			return
 		}
 
-		err := facedb.DeleteFaceByName(ctx, req.Name)
+		err := facedb.DeleteFaceByName(req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Name:   req.Name,
@@ -172,7 +172,7 @@ func handleAdminRequest(
 			return
 		}
 
-		exists, err := facedb.FaceExistsByName(ctx, req.Name)
+		exists, err := facedb.FaceExistsByName(req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Name:   req.Name,
@@ -203,7 +203,7 @@ func handleAdminRequest(
 func handleAddFaceRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	addFaceSem chan int,
 ) {
 	select {
@@ -233,7 +233,7 @@ func addFaceFromCamera(
 	ctx context.Context,
 	name string,
 	cam camera.Camera,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	rec recognition.Recognition,
 ) (int64, error) {
 	select {
@@ -253,7 +253,7 @@ func addFaceFromCamera(
 	default:
 	}
 
-	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 0)
+	embedding, err := rec.GetOneFaceEmbedding(ctx, imageBytes)
 	if err != nil {
 		return 0, fmt.Errorf("get embedding from recognition response: %w", err)
 	}
@@ -262,12 +262,8 @@ func addFaceFromCamera(
 		return 0, recognition.ErrNoFaceEmbedding
 	}
 
-	id, err := facedb.AddFace(ctx, name, embedding[0])
+	id, err := facedb.AddFace(name, embedding)
 	if err != nil {
-		if errors.Is(err, record.ErrAlreadyExists) {
-			return 0, record.ErrAlreadyExists
-		}
-
 		return 0, fmt.Errorf("add face to database: %w", err)
 	}
 
