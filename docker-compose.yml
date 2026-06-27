@@ -20,8 +20,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        INSPIREFACE_SDK_IMAGE: inspireface-cgo-check:latest
     container_name: faced
     environment:
       HTTP_ADDR: :5090

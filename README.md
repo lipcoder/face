@@ -32,6 +32,13 @@ docker compose up -d --build
 
 服务地址默认是 `http://127.0.0.1:5090`。
 
+Dockerfile 会根据构建目标架构自动下载 InspireFace SDK：
+
+- `linux/amd64` 使用 `inspireface-linux-x86-manylinux2014`
+- `linux/arm64` 使用 `inspireface-linux-aarch64`
+
+在 Apple Silicon Mac 上直接执行 `docker compose up -d --build` 会构建 arm64 镜像。GitHub Actions 会发布 `linux/amd64` 和 `linux/arm64` 的多架构镜像，拉取时 Docker 会按运行机器自动选择架构。
+
 ## License
 
 This project is licensed under the PolyForm Noncommercial License 1.0.0.
