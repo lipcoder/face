@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.codex
+InspireFace
+
+Dockerfile
+README.md
+
+**/.DS_Store
+**/tmp
+**/node_modules
+**/dist
+**/build
+**/*.log
