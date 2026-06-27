@@ -23,6 +23,7 @@ FROM ubuntu:22.04 AS runtime
 
 ENV TZ=Asia/Shanghai
 ENV HTTP_ADDR=:5090
+ENV DATABASE_URL=postgres://face:face@postgres:5432/face-data?sslmode=disable
 ENV LD_LIBRARY_PATH=/opt/inspireface-sdk/lib
 ENV INSPIREFACE_PACK_PATH=/opt/models/Megatron
 

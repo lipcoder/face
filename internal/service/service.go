@@ -55,6 +55,13 @@ func (s *RecognitionService) AnalyzePhoto(ctx context.Context, imgBytes []byte) 
 	return s.rec.AnalyzePhoto(ctx, imgBytes)
 }
 
+func (s *RecognitionService) AnalyzePhotoPose(ctx context.Context, imgBytes []byte) (*recognition.FaceResult, error) {
+	if s == nil || s.rec == nil {
+		return nil, recognition.ErrInvalidState
+	}
+	return s.rec.AnalyzePhotoPose(ctx, imgBytes)
+}
+
 func (s *RecognitionService) AnalyzePhotoEmotion(ctx context.Context, imgBytes []byte) (*recognition.EmotionResult, error) {
 	if s == nil || s.rec == nil {
 		return nil, recognition.ErrInvalidState

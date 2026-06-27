@@ -27,8 +27,8 @@ const (
 	defaultThreshold = 0.45
 )
 
-//go:embed 	frontend/*
-var frontendFS embed.FS
+//go:embed templates/*
+var webFS embed.FS
 
 type Handler struct {
 	svc       *service.RecognitionService
@@ -63,37 +63,40 @@ func NewRouter(handler *Handler) *gin.Engine {
 	r.Use(gin.Recovery())
 
 	r.GET("/", handler.Index)
-	r.GET("/app.js", handler.AppJS)
+	r.GET("/action", handler.TemplatePage("action.html"))
+	r.GET("/emotion", handler.TemplatePage("emotion.html"))
+	r.GET("/main", handler.TemplatePage("main.html"))
+	r.GET("/manager", handler.TemplatePage("manager.html"))
 	r.GET("/api/health", handler.Health)
 
 	r.POST("/api/photo", handler.AnalyzePhoto)
 	r.POST("/api/photo/emotion", handler.AnalyzePhotoEmotion)
+	r.POST("/api/emotion", handler.AnalyzeEmotionFaces)
+	r.POST("/api/head-state", handler.AnalyzeHeadState)
 	r.POST("/api/frames", handler.AnalyzeFrameSet)
 	r.POST("/api/faces/add", handler.AddFace)
 	r.POST("/api/faces/delete", handler.DeleteFace)
 	r.POST("/api/faces/search", handler.SearchFace)
 	r.GET("/api/faces/list", handler.ListFaces)
 	r.POST("/api/faces/recognize", handler.RecognizeFace)
+	r.POST("/api/recognize", handler.RecognizeFaces)
 
 	return r
 }
 
 func (h *Handler) Index(c *gin.Context) {
-	data, err := frontendFS.ReadFile("frontend/index.html")
-	if err != nil {
-		writeError(c, err)
-		return
-	}
-	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+	c.Redirect(http.StatusFound, "/main")
 }
 
-func (h *Handler) AppJS(c *gin.Context) {
-	data, err := frontendFS.ReadFile("frontend/app.js")
-	if err != nil {
-		writeError(c, err)
-		return
+func (h *Handler) TemplatePage(name string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data, err := webFS.ReadFile("templates/" + name)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	}
-	c.Data(http.StatusOK, "text/javascript; charset=utf-8", data)
 }
 
 func (h *Handler) Health(c *gin.Context) {
@@ -134,6 +137,52 @@ func (h *Handler) AnalyzePhotoEmotion(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "result": summarizeEmotionResult(result)})
+}
+
+func (h *Handler) AnalyzeEmotionFaces(c *gin.Context) {
+	imgBytes, err := readSingleImage(c, imageFieldName)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	ctx, cancel := h.requestContext(c)
+	defer cancel()
+
+	result, err := h.svc.AnalyzePhotoEmotion(ctx, imgBytes)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok": true,
+		"result": gin.H{
+			"faces": h.emotionFaces(result),
+		},
+	})
+}
+
+func (h *Handler) AnalyzeHeadState(c *gin.Context) {
+	imgBytes, err := readSingleImage(c, imageFieldName)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	ctx, cancel := h.requestContext(c)
+	defer cancel()
+
+	result, err := h.svc.AnalyzePhotoPose(ctx, imgBytes)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok": true,
+		"result": gin.H{
+			"faces": headStateFaces(result),
+		},
+	})
 }
 
 func (h *Handler) AnalyzeFrameSet(c *gin.Context) {
@@ -193,7 +242,9 @@ func (h *Handler) AddFace(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"ok": true,
+		"ok":   true,
+		"id":   id,
+		"name": name,
 		"result": gin.H{
 			"id":            id,
 			"name":          name,
@@ -309,6 +360,35 @@ func (h *Handler) RecognizeFace(c *gin.Context) {
 	})
 }
 
+func (h *Handler) RecognizeFaces(c *gin.Context) {
+	if h.facedb == nil {
+		writeError(c, record.ErrInvalidState)
+		return
+	}
+
+	imgBytes, err := readSingleImage(c, imageFieldName)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	ctx, cancel := h.requestContext(c)
+	defer cancel()
+
+	result, err := h.svc.AnalyzePhoto(ctx, imgBytes)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"ok": true,
+		"result": gin.H{
+			"faces": h.recognizedFaces(result),
+		},
+	})
+}
+
 func (h *Handler) requestContext(c *gin.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.Request.Context(), h.timeout)
 }
@@ -398,10 +478,11 @@ func readNameJSON(c *gin.Context) (string, error) {
 }
 
 type faceOutput struct {
-	FaceCount    int64     `json:"face_count"`
-	Box          []float64 `json:"box,omitempty"`
-	Quality      float64   `json:"quality"`
-	EmbeddingDim int       `json:"embedding_dim,omitempty"`
+	FaceCount    int64              `json:"face_count"`
+	Box          []float64          `json:"box,omitempty"`
+	Quality      float64            `json:"quality"`
+	EmbeddingDim int                `json:"embedding_dim,omitempty"`
+	Pose         []recognition.Pose `json:"pose,omitempty"`
 }
 
 type emotionOutput struct {
@@ -410,6 +491,131 @@ type emotionOutput struct {
 	Quality      float64               `json:"quality"`
 	EmbeddingDim int                   `json:"embedding_dim,omitempty"`
 	Emotion      []recognition.Emotion `json:"emotion,omitempty"`
+	Pose         []recognition.Pose    `json:"pose,omitempty"`
+}
+
+func (h *Handler) emotionFaces(result *recognition.EmotionResult) []gin.H {
+	if result == nil || result.FaceCount <= 0 {
+		return []gin.H{}
+	}
+
+	count := int(result.FaceCount)
+	faces := make([]gin.H, 0, count)
+	for i := 0; i < count; i++ {
+		face := gin.H{
+			"box":     boxAt(result.Box, i),
+			"name":    "未知",
+			"emotion": emotionAt(result.Emotion, i),
+		}
+		if match, ok := h.matchEmbedding(embeddingAt(result.Embedding, i)); ok {
+			face["name"] = match.Name
+			face["match"] = match
+		}
+		faces = append(faces, face)
+	}
+	return faces
+}
+
+func (h *Handler) recognizedFaces(result *recognition.FaceResult) []gin.H {
+	if result == nil || result.FaceCount <= 0 {
+		return []gin.H{}
+	}
+
+	count := int(result.FaceCount)
+	faces := make([]gin.H, 0, count)
+	for i := 0; i < count; i++ {
+		face := gin.H{
+			"box":  boxAt(result.Box, i),
+			"name": "未知",
+		}
+		if match, ok := h.matchEmbedding(embeddingAt(result.Embedding, i)); ok {
+			face["name"] = match.Name
+			face["match"] = match
+		}
+		faces = append(faces, face)
+	}
+	return faces
+}
+
+func (h *Handler) matchEmbedding(embedding []float64) (record.FaceMatch, bool) {
+	if h == nil || h.facedb == nil || len(embedding) == 0 {
+		return record.FaceMatch{}, false
+	}
+	match, err := h.facedb.SearchFaceByEmbedding(embedding, h.threshold)
+	if err != nil {
+		return record.FaceMatch{}, false
+	}
+	return match, true
+}
+
+func headStateFaces(result *recognition.FaceResult) []gin.H {
+	if result == nil || result.FaceCount <= 0 {
+		return []gin.H{}
+	}
+
+	count := int(result.FaceCount)
+	faces := make([]gin.H, 0, count)
+	for i := 0; i < count; i++ {
+		faces = append(faces, gin.H{
+			"box":   boxAt(result.Box, i),
+			"state": headState(poseAt(result.Pose, i)),
+			"pose":  poseAt(result.Pose, i),
+		})
+	}
+	return faces
+}
+
+func boxAt(values []float64, index int) gin.H {
+	offset := index * 4
+	if offset+3 >= len(values) {
+		return gin.H{"x": 0, "y": 0, "width": 0, "height": 0}
+	}
+	return gin.H{
+		"x":      values[offset],
+		"y":      values[offset+1],
+		"width":  values[offset+2],
+		"height": values[offset+3],
+	}
+}
+
+func embeddingAt(values [][]float64, index int) []float64 {
+	if index < 0 || index >= len(values) {
+		return nil
+	}
+	return values[index]
+}
+
+func emotionAt(values []recognition.Emotion, index int) recognition.Emotion {
+	if index < 0 || index >= len(values) {
+		return recognition.Emotion{ID: -1, Label: "unknown"}
+	}
+	return values[index]
+}
+
+func poseAt(values []recognition.Pose, index int) recognition.Pose {
+	if index < 0 || index >= len(values) {
+		return recognition.Pose{}
+	}
+	return values[index]
+}
+
+func headState(pose recognition.Pose) string {
+	switch {
+	case pose.Yaw >= 20:
+		return "looking_left"
+	case pose.Yaw <= -20:
+		return "looking_right"
+	case pose.Pitch >= 15:
+		return "looking_up"
+	case pose.Pitch <= -15:
+		return "looking_down"
+	case pose.Roll >= 15:
+		return "tilted_right"
+	case pose.Roll <= -15:
+		return "tilted_left"
+	default:
+		return "facing"
+	}
 }
 
 func summarizeFaceResult(result *recognition.FaceResult) faceOutput {
@@ -420,6 +626,7 @@ func summarizeFaceResult(result *recognition.FaceResult) faceOutput {
 		FaceCount: result.FaceCount,
 		Box:       result.Box,
 		Quality:   result.Quality,
+		Pose:      result.Pose,
 	}
 	if len(result.Embedding) > 0 {
 		out.EmbeddingDim = len(result.Embedding[0])
@@ -436,6 +643,7 @@ func summarizeEmotionResult(result *recognition.EmotionResult) emotionOutput {
 		Box:       result.Box,
 		Quality:   result.Quality,
 		Emotion:   result.Emotion,
+		Pose:      result.Pose,
 	}
 	if len(result.Embedding) > 0 {
 		out.EmbeddingDim = len(result.Embedding[0])

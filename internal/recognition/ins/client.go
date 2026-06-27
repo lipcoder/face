@@ -33,12 +33,16 @@ import (
 	"unsafe"
 )
 
-const frameSetSize = 25
+const (
+	frameSetSize         = 25
+	enableFacePoseOption = 0x00000200
+)
 
 // FeatureFlags 控制创建 InspireFace session 时启用哪些能力。
 // 当前三个业务函数至少需要 Recognition 和 Quality；情绪接口还需要 Emotion。
 type FeatureFlags struct {
 	Emotion     bool
+	Pose        bool
 	Quality     bool
 	Recognition bool
 }
@@ -99,6 +103,16 @@ type decodedImage struct {
 
 type analyzeOptions struct {
 	emotion bool
+	pose    bool
+}
+
+type face struct {
+	Box       []float64
+	DetScore  float64
+	Quality   float64
+	Embedding []float64
+	Emotion   recognition.Emotion
+	Pose      recognition.Pose
 }
 
 var _ recognition.Analyzer = (*Inspire)(nil)
@@ -206,10 +220,19 @@ func (a *Inspire) AnalyzePhoto(ctx context.Context, imgBytes []byte) (*recogniti
 	return faceResult(faces), nil
 }
 
+// AnalyzePhotoPose 分析单张 jpeg/png 图片，并返回每张脸的 yaw/pitch/roll。
+func (a *Inspire) AnalyzePhotoPose(ctx context.Context, imgBytes []byte) (*recognition.FaceResult, error) {
+	faces, err := a.analyzeImage(ctx, imgBytes, analyzeOptions{pose: true})
+	if err != nil {
+		return nil, err
+	}
+	return faceResult(faces), nil
+}
+
 // AnalyzePhotoEmotion 分析单张 jpeg/png 图片，并额外返回情绪结果。
 // Emotion 的顺序与 Box/Embedding 的人脸顺序一致。
 func (a *Inspire) AnalyzePhotoEmotion(ctx context.Context, imgBytes []byte) (*recognition.EmotionResult, error) {
-	faces, err := a.analyzeImage(ctx, imgBytes, analyzeOptions{emotion: true})
+	faces, err := a.analyzeImage(ctx, imgBytes, analyzeOptions{emotion: true, pose: true})
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +247,7 @@ func (a *Inspire) AnalyzePhotoEmotion(ctx context.Context, imgBytes []byte) (*re
 		Quality:   base.Quality,
 		Embedding: base.Embedding,
 		Emotion:   emotions,
+		Pose:      base.Pose,
 	}, nil
 }
 
@@ -245,7 +269,7 @@ func (a *Inspire) AnalyzeFrameSet(ctx context.Context, frames [][]byte) (*recogn
 
 	type frameFace struct {
 		index int
-		face  recognition.Face
+		face  face
 	}
 	candidates := make([]frameFace, 0, len(frames))
 	for i, frame := range frames {
@@ -298,7 +322,7 @@ func (a *Inspire) AnalyzeFrameSet(ctx context.Context, frames [][]byte) (*recogn
 	}, nil
 }
 
-func (a *Inspire) analyzeImage(ctx context.Context, imgBytes []byte, opts analyzeOptions) ([]recognition.Face, error) {
+func (a *Inspire) analyzeImage(ctx context.Context, imgBytes []byte, opts analyzeOptions) ([]face, error) {
 	if err := a.validate(ctx); err != nil {
 		return nil, err
 	}
@@ -312,7 +336,7 @@ func (a *Inspire) analyzeImage(ctx context.Context, imgBytes []byte, opts analyz
 	return a.analyzeDecoded(ctx, img, opts)
 }
 
-func (a *Inspire) analyzeDecoded(ctx context.Context, img decodedImage, opts analyzeOptions) ([]recognition.Face, error) {
+func (a *Inspire) analyzeDecoded(ctx context.Context, img decodedImage, opts analyzeOptions) ([]face, error) {
 	slot := a.nextSession()
 	if slot == nil {
 		return nil, recognition.ErrInvalidState
@@ -386,10 +410,24 @@ func (a *Inspire) analyzeDecoded(ctx context.Context, img decodedImage, opts ana
 	if faceData.detConfidence != nil {
 		detConfidence = unsafe.Slice((*C.float)(unsafe.Pointer(faceData.detConfidence)), n)
 	}
+	var rollAngles []C.float
+	var yawAngles []C.float
+	var pitchAngles []C.float
+	if opts.pose && a.cfg.Features.Pose {
+		if faceData.angles.roll != nil {
+			rollAngles = unsafe.Slice((*C.float)(unsafe.Pointer(faceData.angles.roll)), n)
+		}
+		if faceData.angles.yaw != nil {
+			yawAngles = unsafe.Slice((*C.float)(unsafe.Pointer(faceData.angles.yaw)), n)
+		}
+		if faceData.angles.pitch != nil {
+			pitchAngles = unsafe.Slice((*C.float)(unsafe.Pointer(faceData.angles.pitch)), n)
+		}
+	}
 
-	faces := make([]recognition.Face, 0, n)
+	faces := make([]face, 0, n)
 	for i := 0; i < n; i++ {
-		face := recognition.Face{
+		face := face{
 			Box: []float64{
 				float64(rects[i].x),
 				float64(rects[i].y),
@@ -409,6 +447,9 @@ func (a *Inspire) analyzeDecoded(ctx context.Context, img decodedImage, opts ana
 		}
 		if opts.emotion && emotions[i] >= 0 {
 			face.Emotion = recognition.Emotion{ID: emotions[i], Label: emotionLabel(emotions[i])}
+		}
+		if opts.pose {
+			face.Pose = poseAt(rollAngles, yawAngles, pitchAngles, i)
 		}
 		if a.cfg.Features.Recognition && len(tokens) > i && a.featureLength > 0 {
 			// HFFaceFeatureExtractCpy 会把 C 侧 embedding 拷贝到我们提供的 buffer。
@@ -484,6 +525,9 @@ func (f FeatureFlags) option() C.HOption {
 	if f.Emotion {
 		opt |= C.HOption(C.HF_ENABLE_FACE_EMOTION)
 	}
+	if f.Pose {
+		opt |= C.HOption(enableFacePoseOption)
+	}
 	return opt
 }
 
@@ -493,7 +537,7 @@ func defaultConfig() Config {
 		DetectPixelLevel:    320,
 		MinFacePixels:       32,
 		SessionCount:        1,
-		Features:            FeatureFlags{Recognition: true, Quality: true, Emotion: true},
+		Features:            FeatureFlags{Recognition: true, Quality: true, Emotion: true, Pose: true},
 		QualityThreshold:    0.45,
 		EmbeddingFrameCount: 5,
 	}
@@ -532,11 +576,12 @@ func decodeBGR(data []byte) (decodedImage, error) {
 	return decodedImage{width: width, height: height, bgr: bgr}, nil
 }
 
-func faceResult(faces []recognition.Face) *recognition.FaceResult {
+func faceResult(faces []face) *recognition.FaceResult {
 	result := &recognition.FaceResult{FaceCount: int64(len(faces))}
 	for _, face := range faces {
 		result.Box = append(result.Box, face.Box...)
 		result.Embedding = append(result.Embedding, face.Embedding)
+		result.Pose = append(result.Pose, face.Pose)
 		if face.Quality > result.Quality {
 			result.Quality = face.Quality
 		}
@@ -563,6 +608,20 @@ func aggregateEmbeddings(embeddings [][]float64) ([]float64, bool) {
 		sum[i] /= float64(len(embeddings))
 	}
 	return l2Normalize(sum), true
+}
+
+func poseAt(rollAngles, yawAngles, pitchAngles []C.float, index int) recognition.Pose {
+	var pose recognition.Pose
+	if index >= 0 && index < len(rollAngles) {
+		pose.Roll = float64(rollAngles[index])
+	}
+	if index >= 0 && index < len(yawAngles) {
+		pose.Yaw = float64(yawAngles[index])
+	}
+	if index >= 0 && index < len(pitchAngles) {
+		pose.Pitch = float64(pitchAngles[index])
+	}
+	return pose
 }
 
 func l2Normalize(values []float64) []float64 {
