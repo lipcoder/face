@@ -1,7 +1,6 @@
 package pgvector
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,40 +8,34 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
-	"github.com/lib/pq"
 )
 
 // AddFace 添加人脸。
-// name 唯一，重复添加返回 ErrAlreadyExists。
-func (s *Store) AddFace(ctx context.Context, name string, embedding []float64) (int64, error) {
+// 同一个 name 可以录入多条人脸数据，唯一身份以返回的 id 为准。
+func (s *Store) AddFace(name string, embedding []float64) (int64, error) {
 	if err := s.check(); err != nil {
 		return 0, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return 0, errors.New("name cannot be empty")
+		return 0, fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
 	}
 
 	embeddingText, err := embeddingToPGVector(embedding)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %w", record.ErrInvalidEmbedding, err)
 	}
 
 	var id int64
 
-	err = s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(s.ctx, `
 		INSERT INTO faces (name, embedding)
 		VALUES ($1, $2::vector)
 		RETURNING id
 	`, name, embeddingText).Scan(&id)
 
 	if err != nil {
-		if isUniqueViolation(err) {
-			return 0, fmt.Errorf("%w: %s", record.ErrAlreadyExists, name)
-		}
-
-		return 0, fmt.Errorf("add face: %w", err)
+		return 0, fmt.Errorf("%w: add face: %w", record.ErrRequestFailed, err)
 	}
 
 	return id, nil
@@ -50,27 +43,27 @@ func (s *Store) AddFace(ctx context.Context, name string, embedding []float64) (
 
 // DeleteFaceByName 删除指定 name 的人脸。
 // 不存在返回 ErrNotFound。
-func (s *Store) DeleteFaceByName(ctx context.Context, name string) error {
+func (s *Store) DeleteFaceByName(name string) error {
 	if err := s.check(); err != nil {
 		return err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return errors.New("name cannot be empty")
+		return fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(s.ctx, `
 		DELETE FROM faces
 		WHERE name = $1
 	`, name)
 
 	if err != nil {
-		return fmt.Errorf("delete face by name: %w", err)
+		return fmt.Errorf("%w: delete face by name: %w", record.ErrRequestFailed, err)
 	}
 
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("get affected rows: %w", err)
+		return fmt.Errorf("%w: get affected rows: %w", record.ErrRequestFailed, err)
 	}
 
 	if affected == 0 {
@@ -81,18 +74,18 @@ func (s *Store) DeleteFaceByName(ctx context.Context, name string) error {
 }
 
 // FaceExistsByName 查询指定 name 是否存在。
-func (s *Store) FaceExistsByName(ctx context.Context, name string) (bool, error) {
+func (s *Store) FaceExistsByName(name string) (bool, error) {
 	if err := s.check(); err != nil {
 		return false, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return false, errors.New("name cannot be empty")
+		return false, fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
 	}
 
 	var exists bool
 
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(s.ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM faces
@@ -101,25 +94,25 @@ func (s *Store) FaceExistsByName(ctx context.Context, name string) (bool, error)
 	`, name).Scan(&exists)
 
 	if err != nil {
-		return false, fmt.Errorf("check face exists by name: %w", err)
+		return false, fmt.Errorf("%w: check face exists by name: %w", record.ErrRequestFailed, err)
 	}
 
 	return exists, nil
 }
 
-// ListFaceNames 查询当前已添加的所有人脸姓名。
-func (s *Store) ListFaceNames(ctx context.Context) ([]string, error) {
+// ListFaceNames 查询当前已添加的所有姓名。同名多条人脸只返回一次。
+func (s *Store) ListFaceNames() ([]string, error) {
 	if err := s.check(); err != nil {
 		return nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT name
+	rows, err := s.db.QueryContext(s.ctx, `
+		SELECT DISTINCT name
 		FROM faces
 		ORDER BY name ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list face names: %w", err)
+		return nil, fmt.Errorf("%w: list face names: %w", record.ErrRequestFailed, err)
 	}
 	defer rows.Close()
 
@@ -127,14 +120,14 @@ func (s *Store) ListFaceNames(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scan face name: %w", err)
+			return nil, fmt.Errorf("%w: scan face name: %w", record.ErrRequestFailed, err)
 		}
 
 		names = append(names, name)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate face names: %w", err)
+		return nil, fmt.Errorf("%w: iterate face names: %w", record.ErrRequestFailed, err)
 	}
 
 	return names, nil
@@ -143,32 +136,31 @@ func (s *Store) ListFaceNames(ctx context.Context) ([]string, error) {
 // SearchFaceByEmbedding 根据 embedding 查询最相似的人脸。
 // 没有人脸、相似度低于 threshold，都返回 ErrNotFound。
 func (s *Store) SearchFaceByEmbedding(
-	ctx context.Context,
 	embedding []float64,
 	threshold float64,
-) (string, float64, error) {
+) (record.FaceMatch, error) {
 	if err := s.check(); err != nil {
-		return "", 0, err
+		return record.FaceMatch{}, err
 	}
 	if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
-		return "", 0, errors.New("threshold must be a finite number")
+		return record.FaceMatch{}, fmt.Errorf("%w: threshold must be a finite number", record.ErrInvalidInput)
 	}
 
 	if threshold < 0 || threshold > 1 {
-		return "", 0, errors.New("threshold must be between 0 and 1")
+		return record.FaceMatch{}, fmt.Errorf("%w: threshold must be between 0 and 1", record.ErrInvalidInput)
 	}
 
 	embeddingText, err := embeddingToPGVector(embedding)
 	if err != nil {
-		return "", 0, err
+		return record.FaceMatch{}, fmt.Errorf("%w: %w", record.ErrInvalidEmbedding, err)
 	}
 
-	var name string
-	var similarity float64
+	var match record.FaceMatch
 
-	err = s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(s.ctx, `
 		WITH nearest AS (
 			SELECT
+				id,
 				name,
 				1 - (embedding <=> $1::vector) AS similarity
 			FROM faces
@@ -176,24 +168,50 @@ func (s *Store) SearchFaceByEmbedding(
 			LIMIT 1
 		)
 		SELECT
+			id,
 			name,
 			similarity
 		FROM nearest
 		WHERE similarity >= $2
 	`, embeddingText, threshold).Scan(
-		&name,
-		&similarity,
+		&match.ID,
+		&match.Name,
+		&match.Similarity,
 	)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", 0, record.ErrNotFound
+		return record.FaceMatch{}, record.ErrNotFound
 	}
 
 	if err != nil {
-		return "", 0, fmt.Errorf("search face by embedding: %w", err)
+		return record.FaceMatch{}, fmt.Errorf("%w: search face by embedding: %w", record.ErrRequestFailed, err)
 	}
 
-	return name, similarity, nil
+	return match, nil
+}
+
+func (s *Store) RecordSignLog(faceID int64, faceSimilarity float64) error {
+	if err := s.check(); err != nil {
+		return err
+	}
+	if faceID <= 0 {
+		return fmt.Errorf("%w: face id must be positive", record.ErrInvalidInput)
+	}
+	if math.IsNaN(faceSimilarity) || math.IsInf(faceSimilarity, 0) {
+		return fmt.Errorf("%w: face similarity must be a finite number", record.ErrInvalidInput)
+	}
+
+	_, err := s.db.ExecContext(s.ctx, `
+		INSERT INTO signin_logs (
+			face_id,
+			face_similarity
+		) VALUES ($1, $2)
+	`, faceID, faceSimilarity)
+	if err != nil {
+		return fmt.Errorf("%w: record sign log: %w", record.ErrRequestFailed, err)
+	}
+
+	return nil
 }
 
 func embeddingToPGVector(embedding []float64) (string, error) {
@@ -229,22 +247,12 @@ func embeddingToPGVector(embedding []float64) (string, error) {
 	return builder.String(), nil
 }
 
-func isUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-
-	if errors.As(err, &pqErr) {
-		return pqErr.Code == "23505"
-	}
-
-	return false
-}
-
 func (s *Store) check() error {
 	if s == nil {
-		return errors.New("pgvector store is nil")
+		return record.ErrInvalidState
 	}
-	if s.db == nil {
-		return errors.New("pgvector database is nil")
+	if s.ctx == nil || s.db == nil {
+		return record.ErrInvalidState
 	}
 	return nil
 }

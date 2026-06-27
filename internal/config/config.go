@@ -7,10 +7,10 @@ import (
 )
 
 type Config struct {
+	HTTPAddr    string
 	DatabaseURL string
-	Hikvision    HikvisionConfig
-	Inspireface  InspirefaceConfig
-	SignInRecord SignInRecordConfig
+	Hikvision   HikvisionConfig
+	Inspireface InspirefaceConfig
 }
 
 type HikvisionConfig struct {
@@ -20,15 +20,12 @@ type HikvisionConfig struct {
 }
 
 type InspirefaceConfig struct {
-	Host string
-}
-
-type SignInRecordConfig struct {
-	SignInDatabaseURL string
+	PackPath string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
+		HTTPAddr:    getEnv("HTTP_ADDR", ":5090"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 
 		Hikvision: HikvisionConfig{
@@ -38,11 +35,7 @@ func Load() (Config, error) {
 		},
 
 		Inspireface: InspirefaceConfig{
-			Host: getEnv("INSPIREFACE_HOST", ""),
-		},
-
-		SignInRecord: SignInRecordConfig{
-			SignInDatabaseURL: getEnv("SIGNIN_DATABASE_URL", ""),
+			PackPath: getEnv("INSPIREFACE_PACK_PATH", ".sdk/models/Megatron"),
 		},
 	}
 
@@ -54,12 +47,8 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.DatabaseURL) == "" {
-		return fmt.Errorf("DATABASE_URL cannot be empty")
-	}
-
-	if strings.TrimSpace(c.SignInRecord.SignInDatabaseURL) == "" {
-		return fmt.Errorf("SIGNIN_DATABASE_URL cannot be empty")
+	if strings.TrimSpace(c.HTTPAddr) == "" {
+		return fmt.Errorf("HTTP_ADDR cannot be empty")
 	}
 
 	return nil

@@ -12,7 +12,7 @@ type ActionRequest struct {
 func (a ActionRequest) AddFace(
 	name string,
 	cam camera.Camera,
-	rec recognition.Recognition,
+	rec recognition.Analyzer,
 ) service.AdminRequest {
 	return service.AdminRequest{
 		Name:   name,

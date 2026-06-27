@@ -13,8 +13,8 @@ import (
 type SignInLoop struct {
 	ctx        context.Context
 	cam        camera.Camera
-	rec        recognition.Recognition
-	facedb     record.Facedb
+	rec        recognition.Analyzer
+	facedb     record.FaceDB
 	interval   time.Duration
 	similarity float64
 	record     record.Record
@@ -24,8 +24,8 @@ type SignInLoop struct {
 func NewSignInLoop(
 	ctx context.Context,
 	cam camera.Camera,
-	rec recognition.Recognition,
-	facedb record.Facedb,
+	rec recognition.Analyzer,
+	facedb record.FaceDB,
 	interval time.Duration,
 	similarity float64,
 	record record.Record,
@@ -87,7 +87,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return err
 			}
 
-			name, facesimilarity, err := l.facedb.SearchFaceByEmbedding(l.ctx, bestembedding, l.similarity)
+			match, err := l.facedb.SearchFaceByEmbedding(bestembedding, l.similarity)
 			if err != nil {
 				if errors.Is(err, record.ErrNotFound) {
 					continue
@@ -95,7 +95,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return fmt.Errorf("attendance search face failed %w", err)
 			}
 
-			err = l.record.RecordSignLog(name, facesimilarity)
+			err = l.record.RecordSignLog(match.ID, match.Similarity)
 			if err != nil {
 				return fmt.Errorf("write attendance record file %w", err)
 			}
@@ -106,7 +106,7 @@ func (l *SignInLoop) StartSignIn() error {
 func extractBestEmbeddingFromCamera(
 	ctx context.Context,
 	cam camera.Camera,
-	rec recognition.Recognition,
+	rec recognition.Analyzer,
 ) ([]float64, error) {
 	select {
 	case <-ctx.Done():
@@ -125,13 +125,21 @@ func extractBestEmbeddingFromCamera(
 	default:
 	}
 
-	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 1)
+	result, err := rec.AnalyzePhoto(ctx, imageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding from recognition response: %w", err)
 	}
-	if len(embedding) == 0 {
+	if result == nil || result.FaceCount == 0 {
+		return nil, recognition.ErrNoFace
+	}
+	for _, embedding := range result.Embedding {
+		if len(embedding) > 0 {
+			return embedding, nil
+		}
+	}
+	if len(result.Embedding) == 0 {
 		return nil, recognition.ErrNoFaceEmbedding
 	}
 
-	return embedding[0], nil
+	return nil, recognition.ErrNoFaceEmbedding
 }

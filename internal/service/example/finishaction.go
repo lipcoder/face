@@ -10,13 +10,16 @@ import (
 	"lipcoder/face/internal/service"
 	"strings"
 	"sync"
+	"time"
 )
+
+const enrollmentFrameCount = 25
 
 type AdminLoop struct {
 	ctx        context.Context
 	reqCh      <-chan service.AdminRequest
 	addFaceSem chan int
-	facedb     record.Facedb
+	facedb     record.FaceDB
 	wg         *sync.WaitGroup
 }
 
@@ -24,7 +27,7 @@ func NewAdminLoop(
 	ctx context.Context,
 	reqCh <-chan service.AdminRequest,
 	addFaceSem chan int,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	wg *sync.WaitGroup,
 ) *AdminLoop {
 	return &AdminLoop{
@@ -76,7 +79,7 @@ func (l *AdminLoop) StartAdminLoop() error {
 func handleAdminRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	addFaceSem chan int,
 ) {
 	if facedb == nil {
@@ -90,7 +93,7 @@ func handleAdminRequest(
 
 	switch req.Action {
 	case "list":
-		names, err := facedb.ListFaceNames(ctx)
+		names, err := facedb.ListFaceNames()
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Action: req.Action,
@@ -145,7 +148,7 @@ func handleAdminRequest(
 			return
 		}
 
-		err := facedb.DeleteFaceByName(ctx, req.Name)
+		err := facedb.DeleteFaceByName(req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Name:   req.Name,
@@ -172,7 +175,7 @@ func handleAdminRequest(
 			return
 		}
 
-		exists, err := facedb.FaceExistsByName(ctx, req.Name)
+		exists, err := facedb.FaceExistsByName(req.Name)
 		if err != nil {
 			sendAdminResult(ctx, req.Reply, service.AdminResult{
 				Name:   req.Name,
@@ -203,7 +206,7 @@ func handleAdminRequest(
 func handleAddFaceRequest(
 	ctx context.Context,
 	req service.AdminRequest,
-	facedb record.Facedb,
+	facedb record.FaceDB,
 	addFaceSem chan int,
 ) {
 	select {
@@ -233,8 +236,8 @@ func addFaceFromCamera(
 	ctx context.Context,
 	name string,
 	cam camera.Camera,
-	facedb record.Facedb,
-	rec recognition.Recognition,
+	facedb record.FaceDB,
+	rec recognition.Analyzer,
 ) (int64, error) {
 	select {
 	case <-ctx.Done():
@@ -242,36 +245,55 @@ func addFaceFromCamera(
 	default:
 	}
 
-	imageBytes, err := cam.Capture()
+	frames, err := captureFrameSet(ctx, cam, enrollmentFrameCount)
 	if err != nil {
-		return 0, fmt.Errorf("capture image: %w", err)
+		return 0, err
 	}
 
-	select {
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	default:
-	}
-
-	embedding, err := rec.GetFaceEmbedding(ctx, imageBytes, 0)
+	result, err := rec.AnalyzeFrameSet(ctx, frames)
 	if err != nil {
-		return 0, fmt.Errorf("get embedding from recognition response: %w", err)
+		return 0, fmt.Errorf("analyze 25 face frames: %w", err)
 	}
 
-	if len(embedding) == 0 {
+	if len(result.Embedding) != 1 || len(result.Embedding[0]) == 0 {
 		return 0, recognition.ErrNoFaceEmbedding
 	}
 
-	id, err := facedb.AddFace(ctx, name, embedding[0])
+	id, err := facedb.AddFace(name, result.Embedding[0])
 	if err != nil {
-		if errors.Is(err, record.ErrAlreadyExists) {
-			return 0, record.ErrAlreadyExists
-		}
-
 		return 0, fmt.Errorf("add face to database: %w", err)
 	}
 
 	return id, nil
+}
+
+func captureFrameSet(ctx context.Context, cam camera.Camera, count int) ([][]byte, error) {
+	if count <= 0 {
+		return nil, recognition.ErrInvalidFrameCount
+	}
+
+	frames := make([][]byte, 0, count)
+	for len(frames) < count {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		imageBytes, err := cam.Capture()
+		if err != nil {
+			return nil, fmt.Errorf("capture frame %d: %w", len(frames)+1, err)
+		}
+		frames = append(frames, imageBytes)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(80 * time.Millisecond):
+		}
+	}
+
+	return frames, nil
 }
 
 func sendAdminResult(

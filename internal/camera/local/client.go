@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"lipcoder/face/internal/camera"
+	"runtime"
 	"time"
 
 	"gocv.io/x/gocv"
@@ -19,8 +20,8 @@ func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
 	if ctx == nil || deviceID < 0 {
 		return nil, camera.ErrInvalidConfig
 	}
-	// 打开本地摄像头
-	localcam, err := gocv.OpenVideoCaptureWithAPI(deviceID, gocv.VideoCaptureV4L2)
+	// 检查摄像头是否可用
+	localcam, err := openLocalCamera(deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: open local camera failed: %w", camera.ErrUnavailable, err)
 	}
@@ -61,12 +62,20 @@ func (local *Local) Capture() ([]byte, error) {
 }
 
 func (local *Local) capture() ([]byte, error) {
-	// 检查构建是否正确
-	if local == nil || local.ctx == nil || local.deviceID < 0 || local.localcam == nil || !local.localcam.IsOpened() {
+	if local == nil ||
+		local.ctx == nil ||
+		local.deviceID < 0 ||
+		local.localcam == nil ||
+		!local.localcam.IsOpened() {
 		return nil, camera.ErrInvalidState
 	}
 
-	// 创建一个空的 OpenCV Mat 容器
+	select {
+	case <-local.ctx.Done():
+		return nil, local.ctx.Err()
+	default:
+	}
+
 	imgcv := gocv.NewMat()
 	defer imgcv.Close()
 
@@ -81,20 +90,59 @@ func (local *Local) capture() ([]byte, error) {
 	default:
 	}
 
-	// 将 OpenCV Mat 图像矩阵编码成一张 JPG 图片的二进制数据
 	image, err := gocv.IMEncode(".jpg", imgcv)
 	if err != nil {
 		return nil, fmt.Errorf("%w: encoding jpg failed: %w", camera.ErrInvalidImage, err)
 	}
 	defer image.Close()
 
-	// 关闭之后，它内部的内存可能不能再安全使用，所以复制一份出来
-	imageBytes := make([]byte, len(image.GetBytes()))
-	copy(imageBytes, image.GetBytes())
-
-	if len(imageBytes) == 0 {
+	raw := image.GetBytes()
+	if len(raw) == 0 {
 		return nil, camera.ErrInvalidImage
 	}
 
+	// image.Close() 后，NativeByteBuffer 内部内存不能继续依赖，所以必须复制一份。
+	imageBytes := make([]byte, len(raw))
+	copy(imageBytes, raw)
+
 	return imageBytes, nil
+}
+
+// openLocalCamera 只支持 macOS 和 Linux
+// macOS 使用 AVFoundation
+// Linux 使用 V4L2
+func openLocalCamera(deviceID int) (*gocv.VideoCapture, error) {
+	api, err := localCameraAPI()
+	if err != nil {
+		return nil, err
+	}
+
+	localcam, err := gocv.OpenVideoCaptureWithAPI(deviceID, api)
+	if err != nil {
+		return nil, err
+	}
+
+	if localcam == nil {
+		return nil, fmt.Errorf("camera capture is nil")
+	}
+
+	if !localcam.IsOpened() {
+		localcam.Close()
+		return nil, fmt.Errorf("camera %d is not opened", deviceID)
+	}
+
+	return localcam, nil
+}
+
+// localCameraAPI 根据当前系统返回明确的摄像头后端。
+// GOOS=darwin 表示 macOS。
+func localCameraAPI() (gocv.VideoCaptureAPI, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		return gocv.VideoCaptureAVFoundation, nil
+	case "linux":
+		return gocv.VideoCaptureV4L2, nil
+	default:
+		return 0, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
 }

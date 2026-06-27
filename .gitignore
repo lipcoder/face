@@ -1,4 +1,11 @@
-InspireFace/
 build*/
 .env
 data/
+.cache/
+.sdk*/
+.vscode/
+run.sh
+InspireFace/
+
+# macOS
+.DS_Store
