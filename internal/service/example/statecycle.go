@@ -146,9 +146,9 @@ func classifyHeadState(pose recognition.Pose) HeadState {
 
 	switch {
 	case pose.Pitch > pitchThreshold:
-		return HeadLookingDown
-	case pose.Pitch < -pitchThreshold:
 		return HeadLookingUp
+	case pose.Pitch < -pitchThreshold:
+		return HeadLookingDown
 	case pose.Yaw > yawThreshold:
 		return HeadLookingRight
 	case pose.Yaw < -yawThreshold:

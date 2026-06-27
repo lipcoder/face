@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>签到识别</title>
+  <style>
+    body { margin: 0; background: #f6f7f9; color: #1f2937; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 980px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 0 0 14px; font-size: 24px; }
+    .stage { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #111827; overflow: hidden; border-radius: 8px; }
+    video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    .status { margin-top: 10px; min-height: 22px; color: #374151; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>签到识别</h1>
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="status" class="status"></div>
+  </main>
+  <script>
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const ctx = overlay.getContext('2d');
+    const statusEl = document.getElementById('status');
+    const captureCanvas = document.createElement('canvas');
+    const captureCtx = captureCanvas.getContext('2d');
+    let recognizing = false;
+
+    function setStatus(text) { statusEl.textContent = text || ''; }
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      resizeCanvases();
+      requestAnimationFrame(loopRecognize);
+    }
+
+    function resizeCanvases() {
+      const w = video.videoWidth || 640;
+      const h = video.videoHeight || 480;
+      captureCanvas.width = w;
+      captureCanvas.height = h;
+      overlay.width = w;
+      overlay.height = h;
+    }
+
+    async function frameBlob() {
+      if (!video.videoWidth || !video.videoHeight) return null;
+      if (captureCanvas.width !== video.videoWidth || captureCanvas.height !== video.videoHeight) resizeCanvases();
+      captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+      return new Promise(resolve => captureCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+    }
+
+    async function loopRecognize() {
+      if (!recognizing) {
+        recognizing = true;
+        try {
+          const blob = await frameBlob();
+          if (blob) {
+            const form = new FormData();
+            form.append('image', blob, 'frame.jpg');
+            const res = await fetch('/api/recognize', { method: 'POST', body: form });
+            if (res.ok) drawDetections((await res.json()).result);
+          }
+        } catch (err) {
+          setStatus(err.message || '识别失败');
+        } finally {
+          recognizing = false;
+        }
+      }
+      setTimeout(() => requestAnimationFrame(loopRecognize), 450);
+    }
+
+    function drawDetections(result) {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      const faces = result && result.faces ? result.faces : [];
+      setStatus(faces.length ? '检测到 ' + faces.length + ' 张脸' : '未检测到人脸');
+      ctx.lineWidth = 3;
+      ctx.font = '18px system-ui, sans-serif';
+      for (const face of faces) {
+        const box = face.box || {};
+        const label = face.name || '未知';
+        ctx.strokeStyle = '#22c55e';
+        ctx.fillStyle = '#22c55e';
+        ctx.strokeRect(box.x || 0, box.y || 0, box.width || 0, box.height || 0);
+        const y = Math.max(0, (box.y || 0) - 26);
+        const width = ctx.measureText(label).width + 12;
+        ctx.fillRect(box.x || 0, y, width, 24);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, (box.x || 0) + 6, y + 18);
+      }
+    }
+
+    startCamera().catch(err => setStatus(err.message));
+    window.addEventListener('resize', resizeCanvases);
+  </script>
+</body>
+</html>

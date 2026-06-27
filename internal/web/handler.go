@@ -50,19 +50,24 @@ func NewFaceHandler(
 	}
 }
 
-// Index 返回基础人脸识别页面。
-func (h *FaceHandler) Index(c *gin.Context) {
-	writeHTML(c, "templates/index.html")
+// MainPage 返回签到识别页面。
+func (h *FaceHandler) MainPage(c *gin.Context) {
+	writeHTML(c, "templates/main.html")
 }
 
-// HeadStatePage 返回头部姿态检测页面。
-func (h *FaceHandler) HeadStatePage(c *gin.Context) {
-	writeHTML(c, "templates/faced1.html")
+// ActionPage 返回头部姿态检测页面。
+func (h *FaceHandler) ActionPage(c *gin.Context) {
+	writeHTML(c, "templates/action.html")
 }
 
 // EmotionPage 返回情感识别页面。
 func (h *FaceHandler) EmotionPage(c *gin.Context) {
-	writeHTML(c, "templates/faced2.html")
+	writeHTML(c, "templates/emotion.html")
+}
+
+// ManagerPage 返回人脸库管理页面。
+func (h *FaceHandler) ManagerPage(c *gin.Context) {
+	writeHTML(c, "templates/manager.html")
 }
 
 // Recognize 识别单帧图片里的人脸，并返回人脸框和匹配到的人名。
@@ -256,9 +261,13 @@ func NewRouter(faceHandler *FaceHandler) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	r.GET("/", faceHandler.Index)
-	r.GET("/faced1", faceHandler.HeadStatePage)
-	r.GET("/faced2", faceHandler.EmotionPage)
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/main")
+	})
+	r.GET("/main", faceHandler.MainPage)
+	r.GET("/emotion", faceHandler.EmotionPage)
+	r.GET("/action", faceHandler.ActionPage)
+	r.GET("/manager", faceHandler.ManagerPage)
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"ok": true})
 	})
