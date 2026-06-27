@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"lipcoder/face/internal/camera"
 	"runtime"
+	"sync"
 	"time"
 
 	"gocv.io/x/gocv"
@@ -13,7 +14,8 @@ import (
 type Local struct {
 	ctx      context.Context
 	deviceID int
-	localcam *gocv.VideoCapture
+	mu       sync.Mutex
+	localcam *gocv.VideoCapture //GoCV 的摄像头捕获对象，底层封装 OpenCV 的 VideoCapture
 }
 
 func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
@@ -27,7 +29,7 @@ func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
 	}
 	if !localcam.IsOpened() {
 		localcam.Close()
-		return nil, camera.ErrInvalidConfig
+		return nil, camera.ErrUnavailable
 	}
 
 	select {
@@ -45,7 +47,14 @@ func NewLocal(ctx context.Context, deviceID int) (*Local, error) {
 }
 
 func (local *Local) Close() {
-	if local == nil || local.localcam == nil {
+	if local == nil {
+		return
+	}
+
+	local.mu.Lock()
+	defer local.mu.Unlock()
+
+	if local.localcam == nil {
 		return
 	}
 
@@ -64,9 +73,7 @@ func (local *Local) Capture() ([]byte, error) {
 func (local *Local) capture() ([]byte, error) {
 	if local == nil ||
 		local.ctx == nil ||
-		local.deviceID < 0 ||
-		local.localcam == nil ||
-		!local.localcam.IsOpened() {
+		local.deviceID < 0 {
 		return nil, camera.ErrInvalidState
 	}
 
@@ -76,10 +83,24 @@ func (local *Local) capture() ([]byte, error) {
 	default:
 	}
 
+	// Mat 是一个矩阵类型，表示图像数据
 	imgcv := gocv.NewMat()
 	defer imgcv.Close()
 
+	// 只锁住对 localcam 的访问。
+	// localcam 是共享资源，不能让多个 goroutine 同时 Read，
+	// 也不能让 Close 和 Read 同时发生。
+	local.mu.Lock()
+
+	if local.localcam == nil || !local.localcam.IsOpened() {
+		local.mu.Unlock()
+		return nil, camera.ErrInvalidState
+	}
+
 	ok := local.localcam.Read(&imgcv)
+
+	local.mu.Unlock()
+
 	if !ok || imgcv.Empty() {
 		return nil, camera.ErrInvalidImage
 	}
@@ -96,12 +117,13 @@ func (local *Local) capture() ([]byte, error) {
 	}
 	defer image.Close()
 
+	// 把OpenCV的Mat编码成JPEG
 	raw := image.GetBytes()
 	if len(raw) == 0 {
 		return nil, camera.ErrInvalidImage
 	}
 
-	// image.Close() 后，NativeByteBuffer 内部内存不能继续依赖，所以必须复制一份。
+	// image.Close() 后，NativeByteBuffer 内部内存不能继续依赖，所以必须复制一份
 	imageBytes := make([]byte, len(raw))
 	copy(imageBytes, raw)
 
@@ -109,8 +131,7 @@ func (local *Local) capture() ([]byte, error) {
 }
 
 // openLocalCamera 只支持 macOS 和 Linux
-// macOS 使用 AVFoundation
-// Linux 使用 V4L2
+// macOS 使用 AVFoundation Linux 使用 V4L2
 func openLocalCamera(deviceID int) (*gocv.VideoCapture, error) {
 	api, err := localCameraAPI()
 	if err != nil {
@@ -134,8 +155,8 @@ func openLocalCamera(deviceID int) (*gocv.VideoCapture, error) {
 	return localcam, nil
 }
 
-// localCameraAPI 根据当前系统返回明确的摄像头后端。
-// GOOS=darwin 表示 macOS。
+// localCameraAPI 根据当前系统返回明确的摄像头后端
+// GOOS=darwin 表示 macOS
 func localCameraAPI() (gocv.VideoCaptureAPI, error) {
 	switch runtime.GOOS {
 	case "darwin":

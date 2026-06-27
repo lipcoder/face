@@ -27,6 +27,7 @@ var (
 	ErrUnsupportedImageFormat = errors.New("camera unsupported image format")
 )
 
+// Capture 从摄像头获取一帧图片，返回 JPEG 格式的字节数组
 type Camera interface {
 	Capture() ([]byte, error)
 }

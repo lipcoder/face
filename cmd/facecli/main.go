@@ -138,7 +138,7 @@ func adminInputLoop(
 	ctx context.Context,
 	reqCh chan<- service.AdminRequest,
 	cam camera.Camera,
-	rec recognition.Recognition,
+	rec recognition.Analyzer,
 	r example.ActionRequest,
 ) {
 	reader := bufio.NewReader(os.Stdin)

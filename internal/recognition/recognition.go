@@ -52,58 +52,58 @@ type Recognition interface {
 }
 
 type Face struct {
-	Index        int
-	Box          []int
-	DetScore     float64
-	Embedding    []float64
-	EmbeddingDim int
-	Pose         Pose
-	Quality      float64
-	RGBLiveness  float64
-	Emotion      Emotion
+	Index        int       `json:"index"`
+	Box          []int     `json:"box,omitempty"`
+	DetScore     float64   `json:"det_score,omitempty"`
+	Embedding    []float64 `json:"embedding,omitempty"`
+	EmbeddingDim int       `json:"embedding_dim,omitempty"`
+	Pose         Pose      `json:"pose,omitempty"`
+	Quality      float64   `json:"quality,omitempty"`
+	RGBLiveness  float64   `json:"rgb_liveness,omitempty"`
+	Emotion      Emotion   `json:"emotion,omitempty"`
 }
 
 type Pose struct {
-	Pitch float64
-	Roll  float64
-	Yaw   float64
+	Pitch float64 `json:"pitch,omitempty"`
+	Roll  float64 `json:"roll,omitempty"`
+	Yaw   float64 `json:"yaw,omitempty"`
 }
 
 type Emotion struct {
-	ID    int
-	Label string
+	ID    int    `json:"id,omitempty"`
+	Label string `json:"label,omitempty"`
 }
 
 type PhotoResult struct {
-	Image     Image
-	FaceCount int
-	Faces     []Face
+	Image     Image  `json:"image,omitempty"`
+	FaceCount int    `json:"face_count"`
+	Faces     []Face `json:"faces,omitempty"`
 }
 
 type Image struct {
-	Channels int
-	Height   int
-	Width    int
+	Channels int `json:"channels,omitempty"`
+	Height   int `json:"height,omitempty"`
+	Width    int `json:"width,omitempty"`
 }
 
 type StateResult struct {
-	Image     Image
-	FaceCount int
-	Faces     []Face
+	Image     Image  `json:"image,omitempty"`
+	FaceCount int    `json:"face_count"`
+	Faces     []Face `json:"faces,omitempty"`
 }
 
 type EmotionResult struct {
-	Image     Image
-	FaceCount int
-	Faces     []Face
+	Image     Image  `json:"image,omitempty"`
+	FaceCount int    `json:"face_count"`
+	Faces     []Face `json:"faces,omitempty"`
 }
 
 type LivenessResult struct {
-	FrameCount int
-	Live       bool
-	BestFrame  Face
-	Embedding  []float64
-	Frames     []Face
+	FrameCount int       `json:"frame_count"`
+	Live       bool      `json:"live"`
+	BestFrame  Face      `json:"best_frame,omitempty"`
+	Embedding  []float64 `json:"embedding,omitempty"`
+	Frames     []Face    `json:"frames,omitempty"`
 }
 
 // FaceAnalyzer 做基础照片识别，返回检测到的人脸、box、quality、embedding 等信息。

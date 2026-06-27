@@ -6,3 +6,7 @@ run.sh
 
 # macOS
 .DS_Store
+
+# main
+.sdk/
+.vscode/

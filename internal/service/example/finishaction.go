@@ -10,7 +10,10 @@ import (
 	"lipcoder/face/internal/service"
 	"strings"
 	"sync"
+	"time"
 )
+
+const enrollmentFrameCount = 25
 
 type AdminLoop struct {
 	ctx        context.Context
@@ -234,7 +237,7 @@ func addFaceFromCamera(
 	name string,
 	cam camera.Camera,
 	facedb record.FaceDB,
-	rec recognition.Recognition,
+	rec recognition.Analyzer,
 ) (int64, error) {
 	select {
 	case <-ctx.Done():
@@ -242,22 +245,53 @@ func addFaceFromCamera(
 	default:
 	}
 
-	imageBytes, err := cam.Capture()
+	frames := make([][]byte, 0, enrollmentFrameCount)
+	for i := 0; i < enrollmentFrameCount; i++ {
+		imageBytes, err := cam.Capture()
+		if err != nil {
+			return 0, fmt.Errorf("capture enrollment frame: %w", err)
+		}
+		if len(imageBytes) == 0 {
+			return 0, recognition.ErrInvalidImage
+		}
+
+		frames = append(frames, imageBytes)
+
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(40 * time.Millisecond):
+		}
+	}
+
+	return EnrollFaceFromFrames(ctx, name, frames, facedb, rec)
+}
+
+func EnrollFaceFromFrames(
+	ctx context.Context,
+	name string,
+	frames [][]byte,
+	facedb record.FaceDB,
+	rec recognition.FineIdentifier,
+) (int64, error) {
+	if facedb == nil {
+		return 0, errors.New("facedb cannot be nil")
+	}
+	if rec == nil {
+		return 0, errors.New("recognition cannot be nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, errors.New("name cannot be empty")
+	}
+	if len(frames) != enrollmentFrameCount {
+		return 0, fmt.Errorf("enrollment requires %d frames", enrollmentFrameCount)
+	}
+
+	embedding, err := rec.GetLivenessEmbedding(ctx, frames)
 	if err != nil {
-		return 0, fmt.Errorf("capture image: %w", err)
+		return 0, fmt.Errorf("get liveness embedding from recognition response: %w", err)
 	}
-
-	select {
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	default:
-	}
-
-	embedding, err := rec.GetOneFaceEmbedding(ctx, imageBytes)
-	if err != nil {
-		return 0, fmt.Errorf("get embedding from recognition response: %w", err)
-	}
-
 	if len(embedding) == 0 {
 		return 0, recognition.ErrNoFaceEmbedding
 	}

@@ -13,7 +13,7 @@ import (
 type SignInLoop struct {
 	ctx        context.Context
 	cam        camera.Camera
-	rec        recognition.Recognition
+	rec        recognition.Analyzer
 	facedb     record.FaceDB
 	interval   time.Duration
 	similarity float64
@@ -24,7 +24,7 @@ type SignInLoop struct {
 func NewSignInLoop(
 	ctx context.Context,
 	cam camera.Camera,
-	rec recognition.Recognition,
+	rec recognition.Analyzer,
 	facedb record.FaceDB,
 	interval time.Duration,
 	similarity float64,
@@ -76,7 +76,7 @@ func (l *SignInLoop) StartSignIn() error {
 			return l.ctx.Err()
 
 		case <-ticker.C:
-			bestembedding, err := extractBestEmbeddingFromCamera(l.ctx, l.cam, l.rec)
+			bestFace, err := extractBestFaceFromCamera(l.ctx, l.cam, l.rec)
 			if errors.Is(err, recognition.ErrNoFace) {
 				continue
 			}
@@ -87,7 +87,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return err
 			}
 
-			match, err := l.facedb.SearchFaceByEmbedding(bestembedding, l.similarity)
+			match, err := l.facedb.SearchFaceByEmbedding(bestFace.Embedding, l.similarity)
 			if err != nil {
 				if errors.Is(err, record.ErrNotFound) {
 					continue
@@ -103,35 +103,48 @@ func (l *SignInLoop) StartSignIn() error {
 	}
 }
 
-func extractBestEmbeddingFromCamera(
+func extractBestFaceFromCamera(
 	ctx context.Context,
 	cam camera.Camera,
-	rec recognition.Recognition,
-) ([]float64, error) {
+	rec recognition.FaceAnalyzer,
+) (recognition.Face, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return recognition.Face{}, ctx.Err()
 	default:
 	}
 
 	imageBytes, err := cam.Capture()
 	if err != nil {
-		return nil, fmt.Errorf("mainCycle get image failed,%w", err)
+		return recognition.Face{}, fmt.Errorf("mainCycle get image failed,%w", err)
 	}
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return recognition.Face{}, ctx.Err()
 	default:
 	}
 
-	embedding, err := rec.GetBestFaceEmbedding(ctx, imageBytes)
+	result, err := rec.AnalyzeBasic(ctx, imageBytes)
 	if err != nil {
-		return nil, fmt.Errorf("get embedding from recognition response: %w", err)
+		return recognition.Face{}, fmt.Errorf("get face data from recognition response: %w", err)
 	}
-	if len(embedding) == 0 {
-		return nil, recognition.ErrNoFaceEmbedding
+	if result.FaceCount == 0 || len(result.Faces) == 0 {
+		return recognition.Face{}, recognition.ErrNoFace
 	}
 
-	return embedding, nil
+	bestFace := result.Faces[0]
+	for _, face := range result.Faces[1:] {
+		if face.Quality > bestFace.Quality {
+			bestFace = face
+		}
+	}
+	if len(bestFace.Box) < 4 {
+		return recognition.Face{}, recognition.ErrInvalidResponse
+	}
+	if len(bestFace.Embedding) == 0 {
+		return recognition.Face{}, recognition.ErrNoFaceEmbedding
+	}
+
+	return bestFace, nil
 }
