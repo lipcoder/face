@@ -7,6 +7,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  INSPIREFACE_REPO: HyperInspire/InspireFace
+  INSPIREFACE_VERSION: v1.2.3
+  INSPIREFACE_MODEL_RELEASE: v1.x
+  INSPIREFACE_MODEL: Megatron
 
 jobs:
   prepare:
@@ -44,11 +48,13 @@ jobs:
             platform: linux/amd64
             runner: ubuntu-24.04
             suffix: amd64
+            sdk_asset_arch: x86-manylinux2014
 
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
             suffix: arm64
+            sdk_asset_arch: aarch64
 
     runs-on: ${{ matrix.runner }}
 
@@ -59,6 +65,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download InspireFace release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+
+          SDK_VERSION="${INSPIREFACE_VERSION#v}"
+          SDK_ASSET="inspireface-linux-${{ matrix.sdk_asset_arch }}-${SDK_VERSION}.zip"
+
+          rm -rf docker-assets
+          mkdir -p docker-assets/downloads
+
+          gh release download "${INSPIREFACE_VERSION}" \
+            --repo "${INSPIREFACE_REPO}" \
+            --pattern "${SDK_ASSET}" \
+            --dir docker-assets/downloads
+
+          gh release download "${INSPIREFACE_MODEL_RELEASE}" \
+            --repo "${INSPIREFACE_REPO}" \
+            --pattern "${INSPIREFACE_MODEL}" \
+            --dir docker-assets/downloads
+
+          test -s "docker-assets/downloads/${SDK_ASSET}"
+          test -s "docker-assets/downloads/${INSPIREFACE_MODEL}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

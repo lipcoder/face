@@ -1,11 +1,11 @@
 build*/
-.env
+.sdk*/
 data/
 .cache/
-.sdk*/
+downloads/
 .vscode/
 run.sh
-InspireFace/
+*.tar
 
 # macOS
 .DS_Store

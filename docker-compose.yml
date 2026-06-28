@@ -17,6 +17,7 @@ services:
       retries: 10
 
   faced:
+    image: face:${VERSION}
     build:
       context: .
       dockerfile: Dockerfile
