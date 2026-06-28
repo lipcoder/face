@@ -1,5 +1,7 @@
 ARG GO_IMAGE=golang:1.26
+ARG RUNTIME_IMAGE=debian:bookworm-slim
 
+# 构建阶段，使用 Go 官方镜像进行编译
 FROM ${GO_IMAGE} AS builder
 
 ARG TARGETARCH
@@ -9,6 +11,7 @@ ARG INSPIREFACE_MODEL=Megatron
 
 WORKDIR /src
 
+# 修改 APT 源为清华源，安装依赖包
 RUN set -eux; \
     . /etc/os-release; \
     write_debian_sources() { \
@@ -23,7 +26,7 @@ RUN set -eux; \
     }; \
     install_apt_deps() { \
         apt-get -o Acquire::Retries=3 update && \
-        apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl unzip pkg-config libopencv-dev; \
+        apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates curl unzip; \
     }; \
     write_debian_sources http://mirrors.tuna.tsinghua.edu.cn/debian http://mirrors.tuna.tsinghua.edu.cn/debian-security; \
     install_apt_deps || { \
@@ -38,6 +41,7 @@ RUN set -eux; \
     }; \
     rm -rf /var/lib/apt/lists/*
 
+# 下载并安装 InspireFace SDK 和模型文件
 RUN set -eux; \
     targetarch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     sdk_version="${INSPIREFACE_VERSION#v}"; \
@@ -71,11 +75,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /out/faced ./cmd/faced && \
-    go build -o /out/facecli ./cmd/facecli
+RUN go build -trimpath -ldflags="-s -w" -o /out/faced ./cmd/faced
 
-FROM ${GO_IMAGE} AS runtime
+FROM ${RUNTIME_IMAGE} AS runtime
 
+# 修改 APT 源为清华源，安装 ca-certificates
 RUN set -eux; \
     . /etc/os-release; \
     write_debian_sources() { \
@@ -90,7 +94,7 @@ RUN set -eux; \
     }; \
     install_apt_deps() { \
         apt-get -o Acquire::Retries=3 update && \
-        apt-get -o Acquire::Retries=3 install -y --no-install-recommends libopencv-dev ca-certificates; \
+        apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates; \
     }; \
     write_debian_sources http://mirrors.tuna.tsinghua.edu.cn/debian http://mirrors.tuna.tsinghua.edu.cn/debian-security; \
     install_apt_deps || { \
@@ -111,8 +115,8 @@ ENV DATABASE_URL=postgres://face:face@postgres:5432/face-data?sslmode=disable
 ENV LD_LIBRARY_PATH=/opt/inspireface-sdk/lib
 ENV INSPIREFACE_PACK_PATH=/opt/models/Megatron
 
+# 将编译好的二进制文件和依赖的 SDK、模型文件从 builder 阶段复制到 runtime 阶段
 COPY --from=builder /out/faced /usr/local/bin/faced
-COPY --from=builder /out/facecli /usr/local/bin/facecli
 COPY --from=builder /opt/inspireface-sdk/lib /opt/inspireface-sdk/lib
 COPY --from=builder /opt/models/Megatron /opt/models/Megatron
 
