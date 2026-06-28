@@ -1,33 +1,13 @@
 ## 人脸识别系统
-项目内当前使用https://github.com/lipcoder/InspireFace
-对原项目进行了删减和改动，构建由docker换为podman，计划更新为pod启动
 
-当前项目正在开发中，如有需要，请先使用版本v1.0.0
-
-### 项目需要的依赖
-opencv hdf5 vtk 
+项目完全脱离python设计，推荐直接使用项目pack内的镜像
 
 ### Docker 启动
-
-只启动 pgvector 数据库，给本地进程使用：
-
-```bash
-docker run -d \
-  --name face \
-  -e POSTGRES_USER=face \
-  -e POSTGRES_PASSWORD=face \
-  -e POSTGRES_DB=face-data \
-  -p 5432:5432 \
-  -v face-data:/var/lib/postgresql/data \
-  pgvector/pgvector:pg16
-
-export DATABASE_URL=postgres://face:face@127.0.0.1:5432/face-data?sslmode=disable
-```
 
 使用 Docker Compose 同时启动数据库和服务：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 服务地址默认是 `http://127.0.0.1:5090`。
