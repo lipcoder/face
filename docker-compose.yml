@@ -17,7 +17,7 @@ services:
       retries: 10
 
   faced:
-    image: ghcr.io/lipcoder/face:2.0.0
+    image: ghcr.io/lipcoder/face:2.1.0
     container_name: faced
     environment:
       HTTP_ADDR: :5090

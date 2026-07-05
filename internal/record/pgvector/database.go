@@ -109,9 +109,22 @@ func (s *Store) initSchema(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS signin_logs (
 			id BIGSERIAL PRIMARY KEY,
 			face_id BIGINT NOT NULL REFERENCES faces(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
 			face_similarity DOUBLE PRECISION NOT NULL,
 			recognized_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
 		);
+
+		ALTER TABLE signin_logs
+		ADD COLUMN IF NOT EXISTS name TEXT;
+
+		UPDATE signin_logs AS logs
+		SET name = faces.name
+		FROM faces
+		WHERE logs.face_id = faces.id
+			AND (logs.name IS NULL OR btrim(logs.name) = '');
+
+		ALTER TABLE signin_logs
+		ALTER COLUMN name SET NOT NULL;
 
 		DO $$
 		BEGIN
@@ -134,6 +147,9 @@ func (s *Store) initSchema(ctx context.Context) error {
 
 		CREATE INDEX IF NOT EXISTS signin_logs_face_id_idx
 		ON signin_logs (face_id);
+
+		CREATE INDEX IF NOT EXISTS signin_logs_name_idx
+		ON signin_logs (name);
 
 		CREATE INDEX IF NOT EXISTS signin_logs_recognized_at_idx
 		ON signin_logs (recognized_at DESC);

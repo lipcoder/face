@@ -95,7 +95,7 @@ func (l *SignInLoop) StartSignIn() error {
 				return fmt.Errorf("attendance search face failed %w", err)
 			}
 
-			err = l.record.RecordSignLog(match.ID, match.Similarity)
+			err = l.record.RecordSignLog(match.ID, match.Name, match.Similarity)
 			if err != nil {
 				return fmt.Errorf("write attendance record file %w", err)
 			}

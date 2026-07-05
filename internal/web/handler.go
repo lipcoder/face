@@ -33,6 +33,7 @@ var webFS embed.FS
 type Handler struct {
 	svc       *service.RecognitionService
 	facedb    record.FaceDB
+	signLog   record.Record
 	timeout   time.Duration
 	threshold float64
 }
@@ -49,9 +50,14 @@ func NewHandler(
 	if threshold <= 0 || threshold > 1 {
 		threshold = defaultThreshold
 	}
+	var signLog record.Record
+	if writer, ok := facedb.(record.Record); ok {
+		signLog = writer
+	}
 	return &Handler{
 		svc:       svc,
 		facedb:    facedb,
+		signLog:   signLog,
 		timeout:   timeout,
 		threshold: threshold,
 	}
@@ -381,10 +387,16 @@ func (h *Handler) RecognizeFaces(c *gin.Context) {
 		return
 	}
 
+	faces, err := h.recognizedFaces(result)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"ok": true,
 		"result": gin.H{
-			"faces": h.recognizedFaces(result),
+			"faces": faces,
 		},
 	})
 }
@@ -516,9 +528,9 @@ func (h *Handler) emotionFaces(result *recognition.EmotionResult) []gin.H {
 	return faces
 }
 
-func (h *Handler) recognizedFaces(result *recognition.FaceResult) []gin.H {
+func (h *Handler) recognizedFaces(result *recognition.FaceResult) ([]gin.H, error) {
 	if result == nil || result.FaceCount <= 0 {
-		return []gin.H{}
+		return []gin.H{}, nil
 	}
 
 	count := int(result.FaceCount)
@@ -531,10 +543,13 @@ func (h *Handler) recognizedFaces(result *recognition.FaceResult) []gin.H {
 		if match, ok := h.matchEmbedding(embeddingAt(result.Embedding, i)); ok {
 			face["name"] = match.Name
 			face["match"] = match
+			if err := h.recordSignMatch(match); err != nil {
+				return nil, err
+			}
 		}
 		faces = append(faces, face)
 	}
-	return faces
+	return faces, nil
 }
 
 func (h *Handler) matchEmbedding(embedding []float64) (record.FaceMatch, bool) {
@@ -546,6 +561,16 @@ func (h *Handler) matchEmbedding(embedding []float64) (record.FaceMatch, bool) {
 		return record.FaceMatch{}, false
 	}
 	return match, true
+}
+
+func (h *Handler) recordSignMatch(match record.FaceMatch) error {
+	if h == nil || h.signLog == nil {
+		return nil
+	}
+	if err := h.signLog.RecordSignLog(match.ID, match.Name, match.Similarity); err != nil {
+		return fmt.Errorf("write sign log: %w", err)
+	}
+	return nil
 }
 
 func headStateFaces(result *recognition.FaceResult) []gin.H {

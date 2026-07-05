@@ -47,10 +47,11 @@ type FaceMatch struct {
 
 type SignLog struct {
 	FaceID         int64
+	Name           string
 	FaceSimilarity float64
 	RecognizedAt   time.Time
 }
 
 type Record interface {
-	RecordSignLog(faceID int64, faceSimilarity float64) error
+	RecordSignLog(faceID int64, name string, faceSimilarity float64) error
 }

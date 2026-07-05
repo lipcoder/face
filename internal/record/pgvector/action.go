@@ -190,12 +190,16 @@ func (s *Store) SearchFaceByEmbedding(
 	return match, nil
 }
 
-func (s *Store) RecordSignLog(faceID int64, faceSimilarity float64) error {
+func (s *Store) RecordSignLog(faceID int64, name string, faceSimilarity float64) error {
 	if err := s.check(); err != nil {
 		return err
 	}
 	if faceID <= 0 {
 		return fmt.Errorf("%w: face id must be positive", record.ErrInvalidInput)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
 	}
 	if math.IsNaN(faceSimilarity) || math.IsInf(faceSimilarity, 0) {
 		return fmt.Errorf("%w: face similarity must be a finite number", record.ErrInvalidInput)
@@ -204,9 +208,10 @@ func (s *Store) RecordSignLog(faceID int64, faceSimilarity float64) error {
 	_, err := s.db.ExecContext(s.ctx, `
 		INSERT INTO signin_logs (
 			face_id,
+			name,
 			face_similarity
-		) VALUES ($1, $2)
-	`, faceID, faceSimilarity)
+		) VALUES ($1, $2, $3)
+	`, faceID, name, faceSimilarity)
 	if err != nil {
 		return fmt.Errorf("%w: record sign log: %w", record.ErrRequestFailed, err)
 	}

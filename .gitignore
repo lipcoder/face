@@ -6,6 +6,7 @@ downloads/
 .vscode/
 run.sh
 *.tar
+.env
 
 # macOS
 .DS_Store
