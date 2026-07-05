@@ -1,6 +1,8 @@
 ## 人脸识别系统
 
-项目完全脱离python设计，推荐直接使用项目pack内的镜像
+项目使用了cgo，暂未测试Windows直接运行二进制的效果，前端设计将来会迁移
+
+当前完美支持macOS和arch liunx
 
 ### Docker 启动
 
@@ -18,6 +20,7 @@ Dockerfile 会根据构建目标架构自动下载 InspireFace SDK：
 - `linux/arm64` 使用 `inspireface-linux-aarch64`
 
 执行 `VERSION=local docker compose -f docker-compose.build.yml build` 会构建镜像
+
 GitHub Actions 已发布 `linux/amd64` 和 `linux/arm64` 的多架构镜像，拉取时 Docker 会按运行机器自动选择架构
 
 ## License
