@@ -3,32 +3,33 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 
-	"lipcoder/face/internal/camera"
-	"lipcoder/face/internal/camera/local"
+	"lipcoder/face/internal/app/camera"
+	"lipcoder/face/internal/app/camera/hikvision"
+	"lipcoder/face/internal/app/camera/local"
+	"lipcoder/face/internal/app/camera/rtsp"
+	"lipcoder/face/internal/app/database/pgvector"
+	"lipcoder/face/internal/app/recognition/ins"
 	"lipcoder/face/internal/config"
-	"lipcoder/face/internal/recognition"
-	"lipcoder/face/internal/recognition/ins"
-	"lipcoder/face/internal/record/pgvector"
 	"lipcoder/face/internal/service"
-	"lipcoder/face/internal/service/example"
 )
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
-	cfg, err := config.Load()
+	configPath := flag.String("config", defaultConfigPath(), "YAML config path")
+	flag.Parse()
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Error("load config failed", "err", err)
 		os.Exit(1)
@@ -36,110 +37,122 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	store, err := pgvector.Init(ctx, cfg.DatabaseURL)
+	store, err := pgvector.Init(ctx, cfg.DB.DSN)
 	if err != nil {
 		logger.Error("init database failed", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			logger.Error("close database failed", "err", err)
-		}
-	}()
+	defer store.Close()
 
-	cam, err := local.NewLocal(ctx, 0)
+	recognizer, processorSpec, err := buildRecognizer(cfg.Processors)
 	if err != nil {
-		logger.Error("init local camera failed", "err", err)
+		logger.Error("init image processor failed", "err", err)
 		os.Exit(1)
 	}
-	defer cam.Close()
-
-	rec, err := newRecognizer(cfg)
+	defer recognizer.Close()
+	hubs, err := buildCameras(ctx, cfg.Cameras)
 	if err != nil {
-		logger.Error("init inspireface failed", "err", err)
+		logger.Error("init camera streams failed", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if err := rec.Close(); err != nil {
-			logger.Error("close inspireface failed", "err", err)
-		}
-	}()
+	defer closeHubs(hubs)
+	if len(hubs) == 0 {
+		logger.Error("facecli requires at least one enabled camera")
+		os.Exit(1)
+	}
 
-	reqCh := make(chan service.AdminRequest)
-	addFaceSem := make(chan int, 2)
+	svc, err := service.New(recognizer, store, hubs, service.Config{
+		DefaultCamera:        cfg.App.DefaultCamera,
+		SimilarityThreshold:  cfg.App.SimilarityThreshold,
+		EnrollmentSamples:    cfg.App.EnrollmentSamples,
+		EnrollmentMinQuality: cfg.App.EnrollmentMinQuality,
+		EnrollmentTimeout:    cfg.App.EnrollmentTimeout,
+		SignInInterval:       cfg.App.SignInInterval,
+		SignInCooldown:       cfg.App.SignInCooldown,
+	})
+	if err != nil {
+		logger.Error("init service failed", "err", err)
+		os.Exit(1)
+	}
 
-	var adminReqWG sync.WaitGroup
-	var loopWG sync.WaitGroup
-
-	adminLoop := example.NewAdminLoop(ctx, reqCh, addFaceSem, store, &adminReqWG)
-	loopWG.Add(1)
+	workers := processorSpec.Pools.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+	queueSize := processorSpec.Pools.QueueSize
+	if queueSize <= 0 {
+		queueSize = 16
+	}
+	requestQueue := make(chan service.AdminRequest, queueSize)
+	adminDone := make(chan error, 1)
 	go func() {
-		defer loopWG.Done()
-		if err := adminLoop.StartAdminLoop(); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("admin loop stopped with error", "err", err)
-			return
-		}
-		logger.Info("admin loop stopped")
+		adminDone <- svc.RunAdminLoop(ctx, requestQueue, workers)
 	}()
 
-	logger.Info("face cli started")
-	var action example.ActionRequest
-	adminInputLoop(ctx, reqCh, cam, rec, action)
+	logger.Info("face cli started", "camera", cfg.App.DefaultCamera)
+	adminInputLoop(ctx, requestQueue, cfg.App.DefaultCamera)
+	close(requestQueue)
+	if err := <-adminDone; err != nil && !errors.Is(err, context.Canceled) {
+		logger.Error("admin loop failed", "err", err)
+	}
 
-	signInLoop := example.NewSignInLoop(ctx, cam, rec, store, 500*time.Millisecond, 0.45, store)
-	loopWG.Add(1)
-	go func() {
-		defer loopWG.Done()
-		if err := signInLoop.StartSignIn(); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("sign in loop stopped with error", "err", err)
+	events, err := svc.StartSignIn(ctx, cfg.App.DefaultCamera, 8)
+	if err != nil {
+		logger.Error("start sign-in stream failed", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("sign-in stream started; press Ctrl+C to stop")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("face cli stopped")
 			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if event.Err != nil {
+				logger.Warn("sign-in frame failed", "err", event.Err)
+				continue
+			}
+			for _, match := range event.Matches {
+				logger.Info(
+					"face signed in",
+					"name", match.Name,
+					"similarity", match.Similarity,
+					"camera", event.CameraID,
+					"sequence", event.Sequence,
+				)
+			}
 		}
-		logger.Info("sign in loop stopped")
-	}()
-
-	logger.Info("sign in loop started")
-	logger.Info("press Ctrl+C to stop")
-
-	<-ctx.Done()
-	logger.Info("shutdown signal received")
-
-	close(reqCh)
-	loopWG.Wait()
-	adminReqWG.Wait()
-
-	logger.Info("face cli stopped")
+	}
 }
 
 func adminInputLoop(
 	ctx context.Context,
-	reqCh chan<- service.AdminRequest,
-	cam camera.Camera,
-	rec recognition.Analyzer,
-	action example.ActionRequest,
+	requestQueue chan<- service.AdminRequest,
+	defaultCamera string,
 ) {
 	reader := bufio.NewReader(os.Stdin)
-
 	for {
 		fmt.Println("请选择操作：")
-		fmt.Println("1. 添加人脸")
+		fmt.Println("1. 从视频流录入人脸")
 		fmt.Println("2. 删除人脸")
 		fmt.Println("3. 查询人脸")
 		fmt.Println("4. 输出所有人姓名列表")
-		fmt.Println("5. 检测当前画面人脸情绪")
 		fmt.Println("0. 退出管理，开始签到")
 		fmt.Print("> ")
 
-		op, err := reader.ReadString('\n')
+		option, err := reader.ReadString('\n')
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
 			fmt.Println("读取输入失败:", err)
 			continue
 		}
-		op = strings.TrimSpace(op)
-
-		switch op {
+		switch strings.TrimSpace(option) {
 		case "0":
-			fmt.Println("退出管理模式，开始签到")
 			return
 		case "1":
 			name, err := readName(reader)
@@ -147,36 +160,42 @@ func adminInputLoop(
 				fmt.Println(err)
 				continue
 			}
-			sendAdminRequest(ctx, reqCh, action.AddFace(name, cam, rec), func(result service.AdminResult) {
-				fmt.Println("添加成功:", result.Name)
-			})
+			result := submitAndWait(ctx, requestQueue, service.AdminAdd, name, defaultCamera)
+			if result.Err == nil && result.Enrollment != nil {
+				fmt.Printf(
+					"添加成功: %s（ID %d，有效样本 %d）\n",
+					result.Name,
+					result.Enrollment.ID,
+					result.Enrollment.Samples,
+				)
+			}
 		case "2":
 			name, err := readName(reader)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
-			sendAdminRequest(ctx, reqCh, action.DeleteFace(name), func(result service.AdminResult) {
+			result := submitAndWait(ctx, requestQueue, service.AdminDelete, name, "")
+			if result.Err == nil {
 				fmt.Println("删除成功:", result.Name)
-			})
+			}
 		case "3":
 			name, err := readName(reader)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
-			sendAdminRequest(ctx, reqCh, action.SearchFace(name), func(result service.AdminResult) {
-				if result.Exists {
-					fmt.Println("查询结果: 存在", result.Name)
-					return
-				}
-				fmt.Println("查询结果: 不存在", result.Name)
-			})
+			result := submitAndWait(ctx, requestQueue, service.AdminSearch, name, "")
+			if result.Err == nil {
+				fmt.Printf("查询结果: %s 存在=%v\n", name, result.Exists)
+			}
 		case "4":
-			sendAdminRequest(ctx, reqCh, action.ListFaceNames(), printFaceNames)
-		case "5":
-			if err := detectEmotionOnce(ctx, cam, rec); err != nil {
-				fmt.Println("情绪检测失败:", err)
+			result := submitAndWait(ctx, requestQueue, service.AdminList, "", "")
+			if result.Err == nil {
+				fmt.Println("所有人姓名列表:")
+				for index, name := range result.Names {
+					fmt.Printf("%d. %s\n", index+1, name)
+				}
 			}
 		default:
 			fmt.Println("未知操作")
@@ -184,114 +203,177 @@ func adminInputLoop(
 	}
 }
 
-func sendAdminRequest(
+func submitAndWait(
 	ctx context.Context,
-	reqCh chan<- service.AdminRequest,
-	req service.AdminRequest,
-	onSuccess func(service.AdminResult),
-) {
-	select {
-	case reqCh <- req:
-	case <-ctx.Done():
-		fmt.Println("操作失败:", ctx.Err())
-		return
+	requestQueue chan<- service.AdminRequest,
+	action service.AdminAction,
+	name string,
+	cameraID string,
+) service.AdminResult {
+	reply, err := service.SubmitAdmin(ctx, requestQueue, action, name, cameraID)
+	if err != nil {
+		fmt.Println("操作失败:", err)
+		return service.AdminResult{Err: err}
 	}
-
 	select {
-	case result := <-req.Reply:
+	case result := <-reply:
 		if result.Err != nil {
 			fmt.Println("操作失败:", result.Err)
-			return
 		}
-		if onSuccess != nil {
-			onSuccess(result)
-		}
+		return result
 	case <-ctx.Done():
 		fmt.Println("操作失败:", ctx.Err())
+		return service.AdminResult{Err: ctx.Err()}
 	}
-}
-
-func printFaceNames(result service.AdminResult) {
-	if len(result.Names) == 0 {
-		fmt.Println("当前没有已添加的人脸")
-		return
-	}
-
-	fmt.Println("所有人姓名列表:")
-	for i, name := range result.Names {
-		fmt.Printf("%d. %s\n", i+1, name)
-	}
-}
-
-func detectEmotionOnce(ctx context.Context, cam camera.Camera, rec recognition.Analyzer) error {
-	imageBytes, err := cam.Capture()
-	if err != nil {
-		return fmt.Errorf("capture image: %w", err)
-	}
-
-	result, err := rec.AnalyzePhotoEmotion(ctx, imageBytes)
-	if err != nil {
-		return err
-	}
-
-	return writeJSON(os.Stdout, summarizeEmotionResult(result))
 }
 
 func readName(reader *bufio.Reader) (string, error) {
 	fmt.Print("请输入姓名: ")
-
 	name, err := reader.ReadString('\n')
 	if err != nil {
 		return "", fmt.Errorf("读取姓名失败: %w", err)
 	}
-
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("姓名不能为空")
 	}
-
 	return name, nil
 }
 
-func newRecognizer(cfg config.Config) (*ins.Inspire, error) {
-	packPath := strings.TrimSpace(cfg.Inspireface.PackPath)
-	if packPath == "" {
-		packPath = strings.TrimSpace(os.Getenv("INSPIREFACE_PACK_PATH"))
+func buildCameras(
+	ctx context.Context,
+	specs map[string]config.ComponentSpec,
+) (map[string]*camera.Hub, error) {
+	hubs := make(map[string]*camera.Hub)
+	ids := sortedCameraIDs(specs)
+	for _, id := range ids {
+		spec := specs[id]
+		if !spec.Enabled {
+			continue
+		}
+		var (
+			source camera.Source
+			err    error
+		)
+		switch strings.ToLower(strings.TrimSpace(spec.Type)) {
+		case "local", "usb":
+			source, err = local.New(id, spec.Options)
+		case "rtsp":
+			source, err = rtsp.New(id, spec.Options)
+		case "hikvision":
+			source, err = hikvision.New(id, spec.Options)
+		default:
+			err = fmt.Errorf("unsupported camera type %q", spec.Type)
+		}
+		if err != nil {
+			closeHubs(hubs)
+			return nil, fmt.Errorf("build camera %q: %w", id, err)
+		}
+		hub, err := camera.NewHub(source)
+		if err != nil {
+			closeHubs(hubs)
+			return nil, err
+		}
+		if err := hub.Start(ctx); err != nil {
+			_ = hub.Close()
+			closeHubs(hubs)
+			return nil, err
+		}
+		hubs[id] = hub
 	}
-	if packPath == "" {
-		packPath = filepath.Join(".sdk", "models", "Megatron")
-	}
-	return ins.NewInspire(packPath)
+	return hubs, nil
 }
 
-type emotionOutput struct {
-	FaceCount    int64                 `json:"face_count"`
-	Box          []float64             `json:"box,omitempty"`
-	Quality      float64               `json:"quality"`
-	EmbeddingDim int                   `json:"embedding_dim,omitempty"`
-	Emotion      []recognition.Emotion `json:"emotion,omitempty"`
+func buildRecognizer(
+	specs map[string]config.ProcessorSpec,
+) (*ins.Inspire, config.ProcessorSpec, error) {
+	ids := make([]string, 0, len(specs))
+	for id := range specs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		spec := specs[id]
+		if !spec.Enabled || !strings.EqualFold(spec.Type, "inspireface") {
+			continue
+		}
+		maxFaces, err := optionInt(spec.Options, "max_faces", 5)
+		if err != nil {
+			return nil, spec, err
+		}
+		detectSize, err := optionInt(spec.Options, "detect_pixel_level", 320)
+		if err != nil {
+			return nil, spec, err
+		}
+		minPixels, err := optionInt(spec.Options, "min_face_pixels", 32)
+		if err != nil {
+			return nil, spec, err
+		}
+		sessions := spec.Pools.Workers
+		if sessions <= 0 {
+			sessions = 1
+		}
+		sessions, err = optionInt(spec.Options, "session_count", sessions)
+		if err != nil {
+			return nil, spec, err
+		}
+		instance, err := ins.NewInspire(
+			optionString(spec.Options, "pack_path", ""),
+			ins.WithMaxFaces(maxFaces),
+			ins.WithDetectPixelLevel(detectSize),
+			ins.WithMinFacePixels(minPixels),
+			ins.WithSessionCount(sessions),
+			ins.WithFeatures(ins.FeatureFlags{Recognition: true, Quality: true, Pose: true}),
+		)
+		return instance, spec, err
+	}
+	return nil, config.ProcessorSpec{}, errors.New("no enabled inspireface processor")
 }
 
-func summarizeEmotionResult(result *recognition.EmotionResult) emotionOutput {
-	if result == nil {
-		return emotionOutput{}
+func sortedCameraIDs(specs map[string]config.ComponentSpec) []string {
+	ids := make([]string, 0, len(specs))
+	for id := range specs {
+		ids = append(ids, id)
 	}
-
-	out := emotionOutput{
-		FaceCount: result.FaceCount,
-		Box:       result.Box,
-		Quality:   result.Quality,
-		Emotion:   result.Emotion,
-	}
-	if len(result.Embedding) > 0 {
-		out.EmbeddingDim = len(result.Embedding[0])
-	}
-
-	return out
+	sort.Strings(ids)
+	return ids
 }
 
-func writeJSON(file *os.File, v any) error {
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+func optionString(options map[string]any, key, fallback string) string {
+	value, ok := options[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	text := strings.TrimSpace(fmt.Sprint(value))
+	if text == "" {
+		return fallback
+	}
+	return text
+}
+
+func optionInt(options map[string]any, key string, fallback int) (int, error) {
+	value, ok := options[key]
+	if !ok || value == nil {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(value)))
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("option %s must be a positive integer", key)
+	}
+	return parsed, nil
+}
+
+func defaultConfigPath() string {
+	if value := strings.TrimSpace(os.Getenv("CONFIG_PATH")); value != "" {
+		return value
+	}
+	return "config.yaml"
+}
+
+func closeHubs(hubs map[string]*camera.Hub) {
+	for _, hub := range hubs {
+		if hub != nil {
+			_ = hub.Close()
+		}
+	}
 }

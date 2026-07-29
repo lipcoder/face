@@ -4,10 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"lipcoder/face/internal/record"
 	"math"
 	"strconv"
 	"strings"
+
+	"lipcoder/face/internal/app/database"
 )
 
 // AddFace 添加人脸。
@@ -18,12 +19,12 @@ func (s *Store) AddFace(name string, embedding []float64) (int64, error) {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return 0, fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
+		return 0, fmt.Errorf("%w: name cannot be empty", database.ErrInvalidInput)
 	}
 
 	embeddingText, err := embeddingToPGVector(embedding)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %w", record.ErrInvalidEmbedding, err)
+		return 0, fmt.Errorf("%w: %w", database.ErrInvalidEmbedding, err)
 	}
 
 	var id int64
@@ -35,7 +36,7 @@ func (s *Store) AddFace(name string, embedding []float64) (int64, error) {
 	`, name, embeddingText).Scan(&id)
 
 	if err != nil {
-		return 0, fmt.Errorf("%w: add face: %w", record.ErrRequestFailed, err)
+		return 0, fmt.Errorf("%w: add face: %w", database.ErrRequestFailed, err)
 	}
 
 	return id, nil
@@ -49,7 +50,7 @@ func (s *Store) DeleteFaceByName(name string) error {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
+		return fmt.Errorf("%w: name cannot be empty", database.ErrInvalidInput)
 	}
 
 	result, err := s.db.ExecContext(s.ctx, `
@@ -58,16 +59,16 @@ func (s *Store) DeleteFaceByName(name string) error {
 	`, name)
 
 	if err != nil {
-		return fmt.Errorf("%w: delete face by name: %w", record.ErrRequestFailed, err)
+		return fmt.Errorf("%w: delete face by name: %w", database.ErrRequestFailed, err)
 	}
 
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("%w: get affected rows: %w", record.ErrRequestFailed, err)
+		return fmt.Errorf("%w: get affected rows: %w", database.ErrRequestFailed, err)
 	}
 
 	if affected == 0 {
-		return fmt.Errorf("%w: %s", record.ErrNotFound, name)
+		return fmt.Errorf("%w: %s", database.ErrNotFound, name)
 	}
 
 	return nil
@@ -80,7 +81,7 @@ func (s *Store) FaceExistsByName(name string) (bool, error) {
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return false, fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
+		return false, fmt.Errorf("%w: name cannot be empty", database.ErrInvalidInput)
 	}
 
 	var exists bool
@@ -94,7 +95,7 @@ func (s *Store) FaceExistsByName(name string) (bool, error) {
 	`, name).Scan(&exists)
 
 	if err != nil {
-		return false, fmt.Errorf("%w: check face exists by name: %w", record.ErrRequestFailed, err)
+		return false, fmt.Errorf("%w: check face exists by name: %w", database.ErrRequestFailed, err)
 	}
 
 	return exists, nil
@@ -112,7 +113,7 @@ func (s *Store) ListFaceNames() ([]string, error) {
 		ORDER BY name ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("%w: list face names: %w", record.ErrRequestFailed, err)
+		return nil, fmt.Errorf("%w: list face names: %w", database.ErrRequestFailed, err)
 	}
 	defer rows.Close()
 
@@ -120,14 +121,14 @@ func (s *Store) ListFaceNames() ([]string, error) {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("%w: scan face name: %w", record.ErrRequestFailed, err)
+			return nil, fmt.Errorf("%w: scan face name: %w", database.ErrRequestFailed, err)
 		}
 
 		names = append(names, name)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("%w: iterate face names: %w", record.ErrRequestFailed, err)
+		return nil, fmt.Errorf("%w: iterate face names: %w", database.ErrRequestFailed, err)
 	}
 
 	return names, nil
@@ -138,24 +139,24 @@ func (s *Store) ListFaceNames() ([]string, error) {
 func (s *Store) SearchFaceByEmbedding(
 	embedding []float64,
 	threshold float64,
-) (record.FaceMatch, error) {
+) (database.FaceMatch, error) {
 	if err := s.check(); err != nil {
-		return record.FaceMatch{}, err
+		return database.FaceMatch{}, err
 	}
 	if math.IsNaN(threshold) || math.IsInf(threshold, 0) {
-		return record.FaceMatch{}, fmt.Errorf("%w: threshold must be a finite number", record.ErrInvalidInput)
+		return database.FaceMatch{}, fmt.Errorf("%w: threshold must be a finite number", database.ErrInvalidInput)
 	}
 
 	if threshold < 0 || threshold > 1 {
-		return record.FaceMatch{}, fmt.Errorf("%w: threshold must be between 0 and 1", record.ErrInvalidInput)
+		return database.FaceMatch{}, fmt.Errorf("%w: threshold must be between 0 and 1", database.ErrInvalidInput)
 	}
 
 	embeddingText, err := embeddingToPGVector(embedding)
 	if err != nil {
-		return record.FaceMatch{}, fmt.Errorf("%w: %w", record.ErrInvalidEmbedding, err)
+		return database.FaceMatch{}, fmt.Errorf("%w: %w", database.ErrInvalidEmbedding, err)
 	}
 
-	var match record.FaceMatch
+	var match database.FaceMatch
 
 	err = s.db.QueryRowContext(s.ctx, `
 		WITH nearest AS (
@@ -180,11 +181,11 @@ func (s *Store) SearchFaceByEmbedding(
 	)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return record.FaceMatch{}, record.ErrNotFound
+		return database.FaceMatch{}, database.ErrNotFound
 	}
 
 	if err != nil {
-		return record.FaceMatch{}, fmt.Errorf("%w: search face by embedding: %w", record.ErrRequestFailed, err)
+		return database.FaceMatch{}, fmt.Errorf("%w: search face by embedding: %w", database.ErrRequestFailed, err)
 	}
 
 	return match, nil
@@ -195,14 +196,14 @@ func (s *Store) RecordSignLog(faceID int64, name string, faceSimilarity float64)
 		return err
 	}
 	if faceID <= 0 {
-		return fmt.Errorf("%w: face id must be positive", record.ErrInvalidInput)
+		return fmt.Errorf("%w: face id must be positive", database.ErrInvalidInput)
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("%w: name cannot be empty", record.ErrInvalidInput)
+		return fmt.Errorf("%w: name cannot be empty", database.ErrInvalidInput)
 	}
 	if math.IsNaN(faceSimilarity) || math.IsInf(faceSimilarity, 0) {
-		return fmt.Errorf("%w: face similarity must be a finite number", record.ErrInvalidInput)
+		return fmt.Errorf("%w: face similarity must be a finite number", database.ErrInvalidInput)
 	}
 
 	_, err := s.db.ExecContext(s.ctx, `
@@ -213,7 +214,7 @@ func (s *Store) RecordSignLog(faceID int64, name string, faceSimilarity float64)
 		) VALUES ($1, $2, $3)
 	`, faceID, name, faceSimilarity)
 	if err != nil {
-		return fmt.Errorf("%w: record sign log: %w", record.ErrRequestFailed, err)
+		return fmt.Errorf("%w: record sign log: %w", database.ErrRequestFailed, err)
 	}
 
 	return nil
@@ -254,10 +255,10 @@ func embeddingToPGVector(embedding []float64) (string, error) {
 
 func (s *Store) check() error {
 	if s == nil {
-		return record.ErrInvalidState
+		return database.ErrInvalidState
 	}
 	if s.ctx == nil || s.db == nil {
-		return record.ErrInvalidState
+		return database.ErrInvalidState
 	}
 	return nil
 }

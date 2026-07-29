@@ -57,16 +57,18 @@ FROM ${RUNTIME_IMAGE} AS runtime
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates; \
+    apt-get install -y --no-install-recommends ca-certificates ffmpeg; \
     rm -rf /var/lib/apt/lists/*
 
 ENV TZ=Asia/Shanghai
+ENV CONFIG_PATH=/etc/face/config.yaml
 ENV HTTP_ADDR=:5090
 ENV DATABASE_URL=postgres://face:face@postgres:5432/face-data?sslmode=disable
 ENV LD_LIBRARY_PATH=/opt/inspireface-sdk/lib
 ENV INSPIREFACE_PACK_PATH=/opt/models/Megatron
 
 COPY --from=builder /out/faced /usr/local/bin/faced
+COPY --from=builder /src/config.yaml /etc/face/config.yaml
 COPY --from=builder /opt/inspireface-sdk/lib /opt/inspireface-sdk/lib
 COPY --from=builder /opt/models/Megatron /opt/models/Megatron
 

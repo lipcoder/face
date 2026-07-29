@@ -8,73 +8,81 @@
     body { margin: 0; background: #f6f7f9; color: #1f2937; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     main { max-width: 980px; margin: 0 auto; padding: 20px; }
     h1 { margin: 0 0 14px; font-size: 24px; }
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    select { min-width: 180px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; }
     .stage { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #111827; overflow: hidden; border-radius: 8px; }
-    video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    img, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
     .status { margin-top: 10px; min-height: 22px; color: #374151; font-size: 14px; }
   </style>
 </head>
 <body>
   <main>
     <h1>头部姿态检测</h1>
-    <div class="stage"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
+    <div class="toolbar"><label for="camera">视频源</label><select id="camera"></select></div>
+    <div class="stage"><img id="stream" alt="摄像头视频流"><canvas id="overlay"></canvas></div>
     <div id="status" class="status"></div>
   </main>
   <script>
-    const video = document.getElementById('video');
+    const streamImage = document.getElementById('stream');
+    const cameraSelect = document.getElementById('camera');
     const overlay = document.getElementById('overlay');
     const ctx = overlay.getContext('2d');
     const statusEl = document.getElementById('status');
-    const captureCanvas = document.createElement('canvas');
-    const captureCtx = captureCanvas.getContext('2d');
     let running = false;
 
     function setStatus(text) { statusEl.textContent = text || ''; }
-
-    async function startCamera() {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-      video.srcObject = stream;
-      await video.play();
-      resizeCanvases();
-      requestAnimationFrame(loopDetect);
+    function escapeHTML(value) {
+      return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    function resizeCanvases() {
-      const w = video.videoWidth || 640;
-      const h = video.videoHeight || 480;
-      captureCanvas.width = w;
-      captureCanvas.height = h;
-      overlay.width = w;
-      overlay.height = h;
+    async function loadCameras() {
+      const res = await fetch('/api/cameras');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '读取摄像头失败');
+      const cameras = data.cameras || [];
+      cameraSelect.innerHTML = cameras.map(id => '<option value="' + escapeHTML(id) + '">' + escapeHTML(id) + '</option>').join('');
+      if (data.default) cameraSelect.value = data.default;
+      updateStream();
+      if (!cameras.length) {
+        setStatus('没有启用的视频源，请检查 config.yaml');
+        return;
+      }
+      loopDetect();
     }
 
-    async function frameBlob() {
-      if (!video.videoWidth || !video.videoHeight) return null;
-      if (captureCanvas.width !== video.videoWidth || captureCanvas.height !== video.videoHeight) resizeCanvases();
-      captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-      return new Promise(resolve => captureCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+    function updateStream() {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      const camera = cameraSelect.value;
+      streamImage.src = camera ? '/api/cameras/' + encodeURIComponent(camera) + '/stream' : '';
+    }
+
+    function resizeOverlay() {
+      const width = streamImage.naturalWidth || 640;
+      const height = streamImage.naturalHeight || 480;
+      if (overlay.width !== width) overlay.width = width;
+      if (overlay.height !== height) overlay.height = height;
     }
 
     async function loopDetect() {
-      if (!running) {
+      const camera = cameraSelect.value;
+      if (camera && !running) {
         running = true;
         try {
-          const blob = await frameBlob();
-          if (blob) {
-            const form = new FormData();
-            form.append('image', blob, 'frame.jpg');
-            const res = await fetch('/api/head-state', { method: 'POST', body: form });
-            if (res.ok) draw((await res.json()).result);
-          }
+          const res = await fetch('/api/cameras/' + encodeURIComponent(camera) + '/head-state', { method: 'POST' });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || '检测失败');
+          draw(data.result);
         } catch (err) {
           setStatus(err.message || '检测失败');
         } finally {
           running = false;
         }
       }
-      setTimeout(() => requestAnimationFrame(loopDetect), 450);
+      setTimeout(loopDetect, 450);
     }
 
     function draw(result) {
+      resizeOverlay();
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       const faces = result && result.faces ? result.faces : [];
       setStatus(faces.length ? '检测到 ' + faces.length + ' 张脸' : '未检测到人脸');
@@ -101,8 +109,9 @@
       return map[state] || state || '未知';
     }
 
-    startCamera().catch(err => setStatus(err.message));
-    window.addEventListener('resize', resizeCanvases);
+    cameraSelect.addEventListener('change', updateStream);
+    streamImage.addEventListener('load', resizeOverlay);
+    loadCameras().catch(err => setStatus(err.message));
   </script>
 </body>
 </html>

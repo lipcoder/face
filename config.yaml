@@ -1,0 +1,66 @@
+db:
+  # Docker Compose 会用 DATABASE_URL 环境变量覆盖此值。
+  dsn: "postgres://face:face@127.0.0.1:5432/face-data?sslmode=disable"
+
+server:
+  address: ":5090"
+  request_timeout: "30s"
+  shutdown_timeout: "10s"
+
+app:
+  default_camera: "local"
+  similarity_threshold: 0.45
+  sign_in_interval: "500ms"
+  sign_in_cooldown: "30s"
+  enrollment_timeout: "15s"
+  # 录入时在线聚合的有效 embedding 数量，不再固定上传或保留 25 张图片。
+  enrollment_samples: 5
+  enrollment_min_quality: 0.45
+
+# 摄像头以 ID 为 key 加载为 map；main 根据 type 把 options 交给对应实现。
+cameras:
+  local:
+    type: "local"
+    # 本机使用时改为 true；容器默认不假设存在 /dev/video0。
+    enabled: false
+    options:
+      device_id: 0
+      width: 1280
+      height: 720
+      fps: 15
+      queue_size: 2
+      jpeg_quality: 85
+
+  entrance_rtsp:
+    type: "rtsp"
+    enabled: false
+    options:
+      url: "rtsp://admin:password@192.168.1.10/Streaming/Channels/101"
+      queue_size: 2
+      jpeg_quality: 85
+
+  entrance_snapshot:
+    type: "hikvision"
+    enabled: false
+    options:
+      url: "http://192.168.1.10/ISAPI/Streaming/channels/101/picture"
+      username: "admin"
+      password: "password"
+      interval: "200ms"
+      request_timeout: "5s"
+      max_frame_bytes: 20971520
+      queue_size: 2
+
+processors:
+  inspireface:
+    type: "inspireface"
+    enabled: true
+    pools:
+      workers: 2
+      queue_size: 32
+    options:
+      pack_path: ".sdk/models/Megatron"
+      max_faces: 5
+      detect_pixel_level: 320
+      min_face_pixels: 32
+      pose: true

@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/lib/pq v1.12.3
-	gocv.io/x/gocv v0.43.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

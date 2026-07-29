@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"lipcoder/face/internal/record"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
+
+	"lipcoder/face/internal/app/database"
 )
 
 const embeddingDim = 512
@@ -23,15 +24,15 @@ type Store struct {
 func Init(ctx context.Context, databaseURL string) (*Store, error) {
 	databaseURL = strings.TrimSpace(databaseURL)
 	if ctx == nil {
-		return nil, fmt.Errorf("%w: context cannot be nil", record.ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: context cannot be nil", database.ErrInvalidConfig)
 	}
 	if databaseURL == "" {
-		return nil, fmt.Errorf("%w: database url cannot be empty", record.ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: database url cannot be empty", database.ErrInvalidConfig)
 	}
 
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open database: %w", record.ErrInvalidConfig, err)
+		return nil, fmt.Errorf("%w: open database: %w", database.ErrInvalidConfig, err)
 	}
 
 	db.SetMaxOpenConns(10)
@@ -41,7 +42,7 @@ func Init(ctx context.Context, databaseURL string) (*Store, error) {
 
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("%w: ping database: %w", record.ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: ping database: %w", database.ErrUnavailable, err)
 	}
 
 	store := &Store{
@@ -156,7 +157,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 	`)
 
 	if err != nil {
-		return fmt.Errorf("%w: init schema: %w", record.ErrRequestFailed, err)
+		return fmt.Errorf("%w: init schema: %w", database.ErrRequestFailed, err)
 	}
 
 	return nil
