@@ -216,7 +216,7 @@ func (d *DataBase) SearchByFeature(feature []float32) (*database.Person, error) 
 	}
 
 	if best == nil || bestSimilarity < database.FaceSimilarityThreshold {
-		return nil, database.ErrNotFound
+		return nil, fmt.Errorf("未找到相似度大于 %.2f 的人员", database.FaceSimilarityThreshold)
 	}
 
 	result := *best
