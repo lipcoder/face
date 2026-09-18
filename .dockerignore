@@ -1,9 +1,0 @@
-.git
-.github
-.cache
-.sdk
-data
-build
-run.sh
-*.tar
-**/.DS_Store
