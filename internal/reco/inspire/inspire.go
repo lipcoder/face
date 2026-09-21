@@ -69,6 +69,23 @@ func Init(packPath string) error {
 	return nil
 }
 
+// Terminate 释放 InspireFace 的全局资源。调用前应先关闭所有 Session。
+// 函数可重复调用，便于初始化失败和进程退出共用同一套清理逻辑。
+func Terminate() error {
+	InitMu.Lock()
+	defer InitMu.Unlock()
+
+	if !InitStatus {
+		return nil
+	}
+	if ret := C.HFTerminateInspireFace(); !cOK(ret) {
+		return cError("HFTerminateInspireFace", ret)
+	}
+	InitStatus = false
+	FeatureLength = 0
+	return nil
+}
+
 // 摄像头模式
 type SessionMode uint8
 
