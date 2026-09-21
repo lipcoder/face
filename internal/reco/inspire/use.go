@@ -27,11 +27,6 @@ func (s *Session) GetFaceMultiFeature(
 		return nil, fmt.Errorf("配置参数无效")
 	}
 
-	// var checked int    // 已检查的帧数
-	// var samples int    // 已获得的合格样本数
-	// var sum []float64  // 特征向量的加权和
-	// var weight float64 // 特征向量的总权重
-
 	var (
 		sum     []float64 // 特征向量的加权和
 		weight  float64   // 特征向量的总权重
