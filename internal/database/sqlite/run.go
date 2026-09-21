@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -71,6 +72,10 @@ func Init(DataBasePath string) (*DataBase, error) {
 		); err != nil {
 			return nil, fmt.Errorf("读取人员失败: %w", err)
 		}
+		person.Feature, err = decodeFeature(featureData)
+		if err != nil {
+			return nil, fmt.Errorf("读取人员 %s 的特征失败: %w", person.PersonID, err)
+		}
 
 		d.people = append(d.people, person)
 	}
@@ -107,9 +112,13 @@ func (d *DataBase) AddPerson(person *database.Person) error {
 		}
 	}
 
+	featureData, err := encodeFeature(person.Feature)
+	if err != nil {
+		return err
+	}
 	result, err := d.db.Exec(
 		"INSERT INTO people (person_id, name, feature) VALUES (?, ?, ?)",
-		person.PersonID, person.Name, person.Feature,
+		person.PersonID, person.Name, featureData,
 	)
 	if err != nil {
 		return fmt.Errorf("添加人员失败: %w", err)
@@ -120,31 +129,32 @@ func (d *DataBase) AddPerson(person *database.Person) error {
 		return fmt.Errorf("获取新插入的人员ID失败: %w", err)
 	}
 
-	// SQLite 添加成功后，同步加入内存
+	// SQLite 添加成功后，同步加入内存。
+	d.mu.Lock()
 	d.people = append(d.people, *person)
+	d.mu.Unlock()
 
 	return nil
 }
 
-func (d *DataBase) DeletePerson(person *database.Person) error {
-	if person == nil {
-		return fmt.Errorf("无效的人员信息")
+func (d *DataBase) DeletePerson(personID string) error {
+	if personID == "" {
+		return fmt.Errorf("学号为空")
+	}
+	result, err := d.db.Exec("DELETE FROM people WHERE person_id = ?", personID)
+	if err != nil {
+		return fmt.Errorf("删除人员失败: %w", err)
+	}
+	if rowsAffected, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("获取删除行数失败: %w", err)
+	} else if rowsAffected == 0 {
+		return fmt.Errorf("未找到学号为 %s 的人员", personID)
 	}
 
-	if person.PersonID != "" {
-		result, err := d.db.Exec("DELETE FROM people WHERE person_id = ?", person.PersonID)
-		if err != nil {
-			return fmt.Errorf("删除人员失败: %w", err)
-		}
-		if rowsAffected, err := result.RowsAffected(); err != nil {
-			return fmt.Errorf("获取删除行数失败: %w", err)
-		} else if rowsAffected == 0 {
-			return fmt.Errorf("未找到学号为 %s 的人员", person.PersonID)
-		}
-	}
-
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for i := range d.people {
-		if d.people[i].PersonID == person.PersonID {
+		if d.people[i].PersonID == personID {
 			d.people = append(
 				d.people[:i],
 				d.people[i+1:]...,
@@ -164,24 +174,36 @@ func (d *DataBase) SearchPerson(person *database.Person) (*database.Person, erro
 	if person.PersonID != "" {
 		row := d.db.QueryRow("SELECT id, person_id, name, feature FROM people WHERE person_id = ?", person.PersonID)
 		var p database.Person
-		if err := row.Scan(&p.ID, &p.PersonID, &p.Name, &p.Feature); err != nil {
+		var featureData []byte
+		if err := row.Scan(&p.ID, &p.PersonID, &p.Name, &featureData); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, fmt.Errorf("未找到学号为 %s 的人员", person.PersonID)
 			}
 			return nil, fmt.Errorf("查询人员失败: %w", err)
 		}
+		feature, decodeErr := decodeFeature(featureData)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("读取人员特征失败: %w", decodeErr)
+		}
+		p.Feature = feature
 		return &p, nil
 	}
 
 	if person.Name != "" {
 		row := d.db.QueryRow("SELECT id, person_id, name, feature FROM people WHERE name = ?", person.Name)
 		var p database.Person
-		if err := row.Scan(&p.ID, &p.PersonID, &p.Name, &p.Feature); err != nil {
+		var featureData []byte
+		if err := row.Scan(&p.ID, &p.PersonID, &p.Name, &featureData); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, fmt.Errorf("未找到姓名为 %s 的人员", person.Name)
 			}
 			return nil, fmt.Errorf("查询人员失败: %w", err)
 		}
+		feature, decodeErr := decodeFeature(featureData)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("读取人员特征失败: %w", decodeErr)
+		}
+		p.Feature = feature
 		return &p, nil
 	}
 
@@ -259,5 +281,31 @@ func cosineSimilarity(a, b []float32) float32 {
 }
 
 func (d *DataBase) ListPeople() ([]database.Person, error) {
-	return d.people, nil
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	people := make([]database.Person, len(d.people))
+	copy(people, d.people)
+	return people, nil
+}
+
+func encodeFeature(feature []float32) ([]byte, error) {
+	if len(feature) != database.FeatureLength {
+		return nil, fmt.Errorf("无效的人脸特征")
+	}
+	data := make([]byte, len(feature)*4)
+	for i, value := range feature {
+		binary.LittleEndian.PutUint32(data[i*4:], math.Float32bits(value))
+	}
+	return data, nil
+}
+
+func decodeFeature(data []byte) ([]float32, error) {
+	if len(data) != database.FeatureLength*4 {
+		return nil, fmt.Errorf("特征数据长度错误: got=%d want=%d", len(data), database.FeatureLength*4)
+	}
+	feature := make([]float32, database.FeatureLength)
+	for i := range feature {
+		feature[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
+	}
+	return feature, nil
 }
