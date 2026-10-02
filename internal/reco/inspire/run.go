@@ -4,16 +4,17 @@ import (
 	"context"
 
 	"github.com/lipcoder/face/internal/media"
+	"github.com/lipcoder/face/internal/reco"
 )
 
-func (s *Session) GetFacePlace(ctx context.Context, frame *media.Frame) ([]media.FaceInfo, error) {
+func (s *Session) GetFacePlace(ctx context.Context, frame *media.Frame) ([]reco.FaceInfo, error) {
 	faces, err := s.process(ctx, frame, false, false)
 	if err != nil {
 		return nil, err
 	}
-	facesInfo := make([]media.FaceInfo, len(faces))
+	facesInfo := make([]reco.FaceInfo, len(faces))
 	for i, face := range faces {
-		facesInfo[i] = media.FaceInfo{
+		facesInfo[i] = reco.FaceInfo{
 			TrackID:             face.TrackID,
 			TrackCount:          face.TrackCount,
 			Box:                 face.Box,
@@ -24,14 +25,14 @@ func (s *Session) GetFacePlace(ctx context.Context, frame *media.Frame) ([]media
 	return facesInfo, nil
 }
 
-func (s *Session) GetFaceFeature(ctx context.Context, frame *media.Frame) ([]media.FaceInfo, error) {
+func (s *Session) GetFaceFeature(ctx context.Context, frame *media.Frame) ([]reco.FaceInfo, error) {
 	faces, err := s.process(ctx, frame, true, true)
 	if err != nil {
 		return nil, err
 	}
-	facesInfo := make([]media.FaceInfo, len(faces))
+	facesInfo := make([]reco.FaceInfo, len(faces))
 	for i, face := range faces {
-		facesInfo[i] = media.FaceInfo{
+		facesInfo[i] = reco.FaceInfo{
 			TrackID:             face.TrackID,
 			TrackCount:          face.TrackCount,
 			Box:                 face.Box,

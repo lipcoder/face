@@ -252,13 +252,13 @@ func (s *Session) Close() error {
 }
 
 type Face struct {
-	TrackID             int64        // 人脸跟踪 ID，唯一标识一张人脸
-	TrackCount          int64        // 人脸跟踪帧数，表示该人脸已经连续被跟踪的帧数
-	Box                 media.Rect   // 人脸框，表示人脸在图像中的位置和大小
-	Angles              media.Angles // 人脸角度，包括翻滚角、偏航角和俯仰角
-	DetectionConfidence float32      // 人脸检测置信度，范围 [0, 1]，值越大表示检测结果越可靠
-	Quality             float32      // 人脸质量分，范围 [0, 1]，值越大表示人脸质量越好
-	Feature             []float32    // 人脸特征向量，长度为 FeatureLength，只有在启用人脸识别功能时才会返回
+	TrackID             int64       // 人脸跟踪 ID，唯一标识一张人脸
+	TrackCount          int64       // 人脸跟踪帧数，表示该人脸已经连续被跟踪的帧数
+	Box                 reco.Rect   // 人脸框，表示人脸在图像中的位置和大小
+	Angles              reco.Angles // 人脸角度，包括翻滚角、偏航角和俯仰角
+	DetectionConfidence float32     // 人脸检测置信度，范围 [0, 1]，值越大表示检测结果越可靠
+	Quality             float32     // 人脸质量分，范围 [0, 1]，值越大表示人脸质量越好
+	Feature             []float32   // 人脸特征向量，长度为 FeatureLength，只有在启用人脸识别功能时才会返回
 }
 
 // Process 处理一帧图像。
@@ -419,13 +419,13 @@ func (s *Session) process(ctx context.Context, frame *media.Frame, quality bool,
 
 		face := Face{
 			TrackID: int64(trackIDs[i]),
-			Box: media.Rect{
+			Box: reco.Rect{
 				X:      int(rects[i].x),
 				Y:      int(rects[i].y),
 				Width:  int(rects[i].width),
 				Height: int(rects[i].height),
 			},
-			Angles: media.Angles{
+			Angles: reco.Angles{
 				Roll:  float32(rolls[i]),
 				Yaw:   float32(yaws[i]),
 				Pitch: float32(pitches[i]),

@@ -7,6 +7,32 @@ import (
 	"github.com/lipcoder/face/internal/media"
 )
 
+// Rect 表示一个矩形区域，表示人脸在图像中的位置和大小
+type Rect struct {
+	X      int
+	Y      int
+	Width  int
+	Height int
+}
+
+// Angles 表示人脸的旋转角度，包括翻滚角、偏航角和俯仰角
+type Angles struct {
+	Roll  float32 // 翻滚角：头向左/右歪
+	Yaw   float32 // 偏航角：头向左/右转
+	Pitch float32 // 俯仰角：抬头/低头
+}
+
+// FaceInfo 表示检测到的人脸信息
+type FaceInfo struct {
+	TrackID             int64
+	TrackCount          int64
+	Box                 Rect
+	Angles              Angles
+	DetectionConfidence float32
+	Quality             float32
+	Feature             []float32
+}
+
 // MultiFrameFeatureConfig 表示多帧特征聚合的配置参数
 type MultiFrameFeatureConfig struct {
 	SampleCount int     // 需要聚合的合格人脸帧数
@@ -19,9 +45,9 @@ type Session interface {
 	// GetFaceMultiFeature 从帧流中聚合一张人脸的特征
 	GetFaceMultiFeature(ctx context.Context, frames <-chan *media.Frame, config MultiFrameFeatureConfig) ([]float32, error)
 	// GetFacePlace 获取人脸在图像中的位置和大小
-	GetFacePlace(ctx context.Context, frame *media.Frame) ([]media.FaceInfo, error)
+	GetFacePlace(ctx context.Context, frame *media.Frame) ([]FaceInfo, error)
 	// GetFaceFeature 获取人脸特征向量
-	GetFaceFeature(ctx context.Context, frame *media.Frame) ([]media.FaceInfo, error)
+	GetFaceFeature(ctx context.Context, frame *media.Frame) ([]FaceInfo, error)
 	// Close 关闭会话，释放资源
 	Close() error
 }

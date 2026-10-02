@@ -29,7 +29,7 @@ type Frame struct {
 	// Data 是由 Go 管理的图像内存。使用 Data 时 Buffer 必须为 nil。
 	Data []byte
 	// Buffer 指向外部 source 拥有的 native/C 图像内存,不可指向 Go 管理的内存指针
-	// 
+	//
 	// Frame 和 Session 都不拥有、也不能释放这块内存；
 	// 调用方必须保证 GetFacePlace/GetFaceFeature 返回前内存始终有效且不会被覆盖
 	// 使用 Buffer 时 Data 必须为 nil
@@ -42,30 +42,4 @@ type Frame struct {
 
 	Format   PixelFormat
 	Rotation Rotation
-}
-
-// Rect 表示一个矩形区域，表示人脸在图像中的位置和大小
-type Rect struct {
-	X      int
-	Y      int
-	Width  int
-	Height int
-}
-
-// Angles 表示人脸的旋转角度，包括翻滚角、偏航角和俯仰角
-type Angles struct {
-	Roll  float32 // 翻滚角：头向左/右歪
-	Yaw   float32 // 偏航角：头向左/右转
-	Pitch float32 // 俯仰角：抬头/低头
-}
-
-// FaceInfo 表示检测到的人脸信息
-type FaceInfo struct {
-	TrackID             int64
-	TrackCount          int64
-	Box                 Rect
-	Angles              Angles
-	DetectionConfidence float32
-	Quality             float32
-	Feature             []float32
 }
