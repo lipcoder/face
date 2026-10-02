@@ -28,10 +28,11 @@ const (
 type Frame struct {
 	// Data 是由 Go 管理的图像内存。使用 Data 时 Buffer 必须为 nil。
 	Data []byte
-	// Buffer 指向外部 source 拥有的 native/C 图像内存。
-	// Frame 和 Session 都不拥有、也不能释放这块内存；调用方必须保证
-	// GetFacePlace/GetFaceFeature 返回前内存始终有效且不会被覆盖。
-	// 使用 Buffer 时 Data 必须为 nil。
+	// Buffer 指向外部 source 拥有的 native/C 图像内存,不可指向 Go 管理的内存指针
+	// 
+	// Frame 和 Session 都不拥有、也不能释放这块内存；
+	// 调用方必须保证 GetFacePlace/GetFaceFeature 返回前内存始终有效且不会被覆盖
+	// 使用 Buffer 时 Data 必须为 nil
 	Buffer unsafe.Pointer
 	// Size 是 Buffer 指向的有效数据大小；Data 模式下使用 len(Data)。
 	Size int

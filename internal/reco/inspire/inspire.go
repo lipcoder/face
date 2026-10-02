@@ -292,12 +292,12 @@ func (s *Session) process(ctx context.Context, frame *media.Frame, quality bool,
 		return nil, err
 	}
 
-	// Data 会复制到 Session 自有的 C 内存；外部 native Buffer 则直接使用。
+	// Data 会复制到 Session 自有的 C 内存；外部 native Buffer 则直接使用
 	imageBuffer, err := s.frameBuffer(frame)
 	if err != nil {
 		return nil, err
 	}
-	// frameBuffer 不会保存外部 Buffer；它只在本次同步处理返回前使用。
+	// frameBuffer 不会保存外部 Buffer；它只在本次同步处理返回前使用
 	defer runtime.KeepAlive(frame)
 	if err := ctx.Err(); err != nil {
 		return nil, err
