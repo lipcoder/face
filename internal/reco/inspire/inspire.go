@@ -49,6 +49,11 @@ func Init(packPath string) error {
 	}
 	defer C.free(unsafe.Pointer(cPath))
 
+	// 在加载模型包之前关闭 SDK 日志，避免初始化信息输出到终端。
+	if ret := C.HFLogDisable(); !cOK(ret) {
+		return cError("HFLogDisable", ret)
+	}
+
 	// C.HFLaunchInspireFace 初始化 sdk
 	if ret := C.HFLaunchInspireFace(cPath); !cOK(ret) {
 		return cError("HFLaunchInspireFace", ret)
