@@ -115,6 +115,7 @@ type Session struct {
 	enableRecognition bool            // 是否启用人脸特征提取能力
 	enableQuality     bool            // 是否计算人脸质量分
 	closed            bool            // 是否已经关闭
+	config            SessionConfig   // 创建 Session 时的配置
 }
 
 // NewSession 创建一个新的识别会话
@@ -201,6 +202,7 @@ func NewSession(config SessionConfig) (*Session, error) {
 		maxFaces:          config.MaxFaces,
 		enableRecognition: config.EnableRecognition,
 		enableQuality:     config.EnableQuality,
+		config:            config,
 	}
 
 	if config.MinFacePixels > 0 {
@@ -252,8 +254,8 @@ func (s *Session) Close() error {
 }
 
 type Face struct {
-	TrackID             int64       // 人脸跟踪 ID，唯一标识一张人脸
-	TrackCount          int64       // 人脸跟踪帧数，表示该人脸已经连续被跟踪的帧数
+	TrackID             int64       // 当前 Session 内的轨迹 ID；仅跟踪模式下可用于关联连续帧
+	TrackCount          int64       // 人脸跟踪帧数，表示该人脸已经连续被跟踪的帧数，但不能依赖于此值判断人脸是否稳定，因为 SDK 内部可能会丢帧或重新分配 TrackID
 	Box                 reco.Rect   // 人脸框，表示人脸在图像中的位置和大小
 	Angles              reco.Angles // 人脸角度，包括翻滚角、偏航角和俯仰角
 	DetectionConfidence float32     // 人脸检测置信度，范围 [0, 1]，值越大表示检测结果越可靠
