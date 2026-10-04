@@ -1,4 +1,4 @@
-package sqlite
+package sqlitegorm
 
 import (
 	"encoding/binary"
@@ -34,10 +34,10 @@ func (personRow) TableName() string { return "people" }
 
 // attendanceRow 定义了签到记录表的结构体
 type attendanceRow struct {
-	ID       int64  `gorm:"primaryKey;autoIncrement"`                                                                            // primaryKey 主键,autoIncrement 自增
-	PersonID string `gorm:"uniqueIndex:attendance_person_id_date;index:attendance_date_signed_at_person_id,priority:3;not null"` // uniqueIndex 唯一索引,not null 非空
-	Date     string `gorm:"uniqueIndex:attendance_person_id_date;index:attendance_date_signed_at_person_id,priority:1;not null"` // uniqueIndex 唯一索引,not null 非空
-	SignedAt string `gorm:"index:attendance_date_signed_at_person_id,priority:2;not null"`                                       // index 索引,not null 非空
+	ID       int64  `gorm:"primaryKey;autoIncrement"`                                      // 主键，自增
+	PersonID string `gorm:"index:attendance_date_signed_at_person_id,priority:3;not null"` // 联合索引第 3 列，非空
+	Date     string `gorm:"index:attendance_date_signed_at_person_id,priority:1;not null"` // 联合索引第 1 列，非空
+	SignedAt string `gorm:"index:attendance_date_signed_at_person_id,priority:2;not null"` // 联合索引第 2 列，非空
 }
 
 // TableName 告诉 GORM 这个结构体对应的数据库表名是 "attendance"
@@ -46,7 +46,7 @@ func (attendanceRow) TableName() string { return "attendance" }
 type DataBase struct {
 	mu       sync.RWMutex
 	gormDB   *gorm.DB
-	person   []database.Person
+	persons   []database.Person
 	location *time.Location
 }
 
@@ -108,7 +108,7 @@ func Open(path string) (*DataBase, error) {
 
 	resultDB := &DataBase{
 		gormDB:   gormDB,
-		person:   make([]database.Person, 0, len(personRows)),
+		persons:   make([]database.Person, 0, len(personRows)),
 		location: location,
 	}
 
@@ -119,7 +119,7 @@ func Open(path string) (*DataBase, error) {
 			return nil, fmt.Errorf("读取人员 %s 的特征失败: %w", row.PersonID, err)
 		}
 
-		resultDB.person = append(resultDB.person, person)
+		resultDB.persons = append(resultDB.persons, person)
 	}
 
 	return resultDB, nil
@@ -155,14 +155,14 @@ func (d *DataBase) AddPerson(p *database.Person) error {
 	// 更新人员ID并添加到内存中,这里的ID之前只是为了让实现可以直接使用接口文件的Person结构体，现在不需要了，但是也留下了
 	p.ID = personRow.ID
 	d.mu.Lock()
-	d.person = append(d.person, database.Person{ID: p.ID, PersonID: p.PersonID, Name: p.Name, Feature: append([]float32(nil), p.Feature...)})
+	d.persons = append(d.persons, database.Person{ID: p.ID, PersonID: p.PersonID, Name: p.Name, Feature: append([]float32(nil), p.Feature...)})
 	d.mu.Unlock()
 	return nil
 }
 
-func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, bool, error) {
+func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, error) {
 	if p == nil {
-		return nil, false, fmt.Errorf("无效的人员信息")
+		return nil, fmt.Errorf("无效的人员信息")
 	}
 
 	if p.PersonID != "" {
@@ -175,14 +175,14 @@ func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, bool, err
 		if err == nil {
 			result, err := decodePerson(row)
 			if err != nil {
-				return nil, false, fmt.Errorf("读取人员特征失败: %w", err)
+				return nil, fmt.Errorf("读取人员特征失败: %w", err)
 			}
 
-			return &result, true, nil
+			return &result, nil
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, false, fmt.Errorf("按学号查询人员失败: %w", err)
+			return nil, fmt.Errorf("按学号查询人员失败: %w", err)
 		}
 	}
 
@@ -196,60 +196,61 @@ func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, bool, err
 		if err == nil {
 			result, err := decodePerson(row)
 			if err != nil {
-				return nil, false, fmt.Errorf("读取人员特征失败: %w", err)
+				return nil, fmt.Errorf("读取人员特征失败: %w", err)
 			}
 
-			return &result, true, nil
+			return &result, nil
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, false, fmt.Errorf("按姓名查询人员失败: %w", err)
+			return nil, fmt.Errorf("按姓名查询人员失败: %w", err)
 		}
 	}
 
-	return nil, false, fmt.Errorf(
+	return nil, fmt.Errorf(
 		"未找到匹配的人员，学号 %q、姓名 %q 均无有效匹配",
 		p.PersonID,
 		p.Name,
 	)
 }
 
-func (d *DataBase) DeletePerson(personID string) error {
+func (d *DataBase) DeletePerson(personID string) (bool, error) {
 	if personID == "" {
-		return fmt.Errorf("学号为空")
+		return false, fmt.Errorf("学号为空")
 	}
 
-	person, _, err := d.SearchPerson(&database.Person{
+	person, err := d.SearchPerson(&database.Person{
 		PersonID: personID,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := d.gormDB.Delete(&personRow{}, person.ID).Error; err != nil {
-		return fmt.Errorf("删除人员失败: %w", err)
+		return false, fmt.Errorf("删除人员失败: %w", err)
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for i := range d.person {
-		if d.person[i].ID == person.ID {
-			d.person = append(d.person[:i], d.person[i+1:]...)
+	for i := range d.persons {
+		if d.persons[i].ID == person.ID {
+			d.persons = append(d.persons[:i], d.persons[i+1:]...)
 			break
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
-// attendanceRecords 将 []attendanceRow 转换为 []database.Attendance
-func attendanceRecords(rows []attendanceRow) []database.Attendance {
-	records := make([]database.Attendance, 0, len(rows))
-	for _, row := range rows {
-		records = append(records, database.Attendance{PersonID: row.PersonID, SignDate: row.Date, SignedAt: row.SignedAt})
-	}
-	return records
+func (d *DataBase) ListPersons() ([]database.Person, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	persons := make([]database.Person, len(d.persons))
+	copy(persons, d.persons)
+	
+	return persons, nil
 }
 
 // encodeFeature 将 []float32 转换为 []byte
