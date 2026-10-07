@@ -48,7 +48,7 @@ type Client struct {
 // 启动后台goroutine来处理视频帧
 func Open(options FrameOptions) (*Client, error) {
 	if options.Device == "" {
-		options.Device = "default"
+		options.Device = "0"
 	}
 
 	if options.Width == 0 {
@@ -258,6 +258,7 @@ func (c *Client) Close() error {
 	if c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
 	}
+	c.mu.Unlock()
 
 	// 等待后台 goroutine 退出，确保资源被释放
 	<-c.done

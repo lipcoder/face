@@ -173,8 +173,10 @@ func Run(
 						}
 					}
 
-					// 无论是否匹配成功都缓存
-					MapServiceFaceInfos[key] = newServiceFaceInfo
+					// 未匹配的特征下次继续查询，以便新录入的人立即生效。
+					if found {
+						MapServiceFaceInfos[key] = newServiceFaceInfo
+					}
 				}
 			}
 
