@@ -59,7 +59,7 @@ func (s *Session) GetCyclicFaceFeature(
 	ctx context.Context,
 	frames <-chan *media.Frame,
 	results chan<- []reco.FaceInfo,
-	config *reco.CyclicFeatureConfig,
+	config reco.CyclicFeatureConfig,
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -171,7 +171,7 @@ func (s *Session) GetCyclicFaceFeature(
 }
 
 // faceReadyForRecognition 判断人脸是否满足提取特征的条件
-func faceReadyForRecognition(face reco.FaceInfo, frame *media.Frame, config *reco.CyclicFeatureConfig) bool {
+func faceReadyForRecognition(face reco.FaceInfo, frame *media.Frame, config reco.CyclicFeatureConfig) bool {
 	if frame == nil || face.Box.Width <= 0 || face.Box.Height <= 0 {
 		return false
 	}

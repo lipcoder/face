@@ -43,6 +43,7 @@ func Run(
 	// 三个channel，分别用于：
 	// 1. 读取视频帧
 	frames := make(chan *media.Frame)
+	defer close(frames)
 	// 2. 获取人脸识别结果
 	faceResults := make(chan []reco.FaceInfo)
 	// 3. 获取 GetCyclicFaceFeature 的错误

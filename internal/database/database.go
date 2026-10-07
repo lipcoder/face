@@ -20,9 +20,9 @@ type Database interface {
 	// AddPerson 添加人员信息到数据库
 	AddPerson(person *Person) error
 	// DeletePerson 删除人员信息
-	DeletePerson(personID string) error
+	DeletePerson(personID string) (bool, error)
 	// SearchPerson 查找人员信息
-	SearchPerson(person *Person) (*Person, bool, error)
+	SearchPerson(person *Person) (*Person, error)
 	// SearchByFeature 根据特征向量查找人员信息
 	SearchByFeature(feature []float32) (*Person, bool, error)
 
