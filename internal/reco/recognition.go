@@ -55,7 +55,7 @@ type Session interface {
 	// GetFaceFeature 获取人脸特征向量
 	GetFaceFeature(ctx context.Context, frame *media.Frame) ([]FaceInfo, error)
 	// GetCyclicFaceFeature 获取循环人脸特征
-	GetCyclicFaceFeature(ctx context.Context, frames <-chan *media.Frame, results chan<- []FaceInfo) error
+	GetCyclicFaceFeature(ctx context.Context, frames <-chan *media.Frame, results chan<- []FaceInfo, config CyclicFeatureConfig) error
 	// Close 关闭会话，释放资源
 	Close() error
 }
