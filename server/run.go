@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -37,6 +38,7 @@ func Run(
 	session reco.Session,
 	src source.Source,
 	output chan Result,
+	cyclicConfig reco.CyclicFeatureConfig,
 ) error {
 	// 三个channel，分别用于：
 	// 1. 读取视频帧
@@ -51,6 +53,7 @@ func Run(
 			ctx,
 			frames,
 			faceResults,
+			cyclicConfig,
 		)
 	}()
 
@@ -69,7 +72,7 @@ func Run(
 	//    保存结果
 	MapServiceFaceInfos := make(map[string]ServiceFaceInfo)
 
-	for{
+	for {
 		frame, err := src.Read(ctx)
 		if err != nil {
 			return err
@@ -132,21 +135,21 @@ func Run(
 				// 把 []float32 的原始二进制内容转换成 string，作为 map key
 				buf := make([]byte, len(newFaceInfo.Feature)*4)
 
-				for i,value := range newFaceInfo.Feature {
+				for i, value := range newFaceInfo.Feature {
 					binary.LittleEndian.PutUint32(
 						buf[i*4:],
 						math.Float32bits(value),
 					)
 				}
 
-				// 
+				// 将 buf 转换为 string，作为 map key
 				key := string(buf)
 
 				if oldServiceFaceInfo, ok := MapServiceFaceInfos[key]; ok {
 					// 相同 embedding 已经处理过，直接复用身份信息
 					newServiceFaceInfo.PersonID = oldServiceFaceInfo.PersonID
 					newServiceFaceInfo.Name = oldServiceFaceInfo.Name
-				}else {
+				} else {
 					// 第一次看到这个 embedding，进行数据库余弦搜索
 					person, found, err := db.SearchByFeature(newFaceInfo.Feature)
 					if err != nil {
@@ -195,4 +198,97 @@ func Run(
 			return ctx.Err()
 		}
 	}
+}
+
+func Add(
+	ctx context.Context,
+	db database.Database,
+	session reco.Session,
+	src source.Source,
+	personID string,
+	name string,
+	multiFrameConfig reco.MultiFrameFeatureConfig,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if session == nil {
+		return fmt.Errorf("session为空")
+	}
+	if src == nil {
+		return fmt.Errorf("视频源为空")
+	}
+	if personID == "" || name == "" {
+		return fmt.Errorf("personID或name为空")
+	}
+
+	config := multiFrameConfig
+
+	// context.WithCancel(ctx)创建一个可单独停止的子 context，
+	// 传给 Add 的读帧协程和识别函数。识别完成或报错后调用 cancel()，
+	// 让还在等待下一帧或 status的协程退出，这样 Add才能等它结束。
+	readCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	frames := make(chan *media.Frame) // 读取视频帧的 channel
+	status := make(chan bool)         // 处理状态的 channel
+	readDone := make(chan error, 1)   // 读取视频帧的协程完成后会发送一个错误或nil到这个 channel
+	go func() {
+		defer close(frames)
+		for sent := 0; sent < config.MaxFrames; {
+			frame, err := src.Read(readCtx)
+			if err != nil {
+				readDone <- err
+				return
+			}
+			if frame == nil {
+				continue
+			}
+			select {
+			case frames <- frame:
+			case <-readCtx.Done():
+				readDone <- readCtx.Err()
+				return
+			}
+			select {
+			case ready := <-status:
+				if !ready {
+					readDone <- fmt.Errorf("人脸帧处理失败")
+					return
+				}
+				sent++
+			case <-readCtx.Done():
+				readDone <- readCtx.Err()
+				return
+			}
+		}
+		readDone <- nil
+	}()
+
+	feature, err := session.GetFaceMultiFeature(readCtx, frames, status, config)
+	cancel()
+	sourceErr := <-readDone
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if sourceErr != nil && !errors.Is(sourceErr, context.Canceled) {
+			return fmt.Errorf("读取视频帧失败: %w", sourceErr)
+		}
+		return fmt.Errorf("提取人脸特征失败: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// 将提取到的人脸特征保存到数据库
+	if err := db.AddPerson(&database.Person{
+		PersonID: personID,
+		Name:     name,
+		Feature:  feature,
+	}); err != nil {
+		return fmt.Errorf("添加人员失败: %w", err)
+	}
+	return nil
 }
