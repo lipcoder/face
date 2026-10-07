@@ -40,6 +40,12 @@ type MultiFrameFeatureConfig struct {
 	MinQuality  float32 // 最低人脸质量分
 }
 
+type CyclicFeatureConfig struct {
+	MinReadyFrames       int     // 连续满足条件的最少帧数
+	MinSearchFaceQuality float32 // 人脸质量的最小阈值，低于此值的人脸不参与特征提取
+	FaceEdgeMargin       float64 // 人脸框四周至少留出自身边长的画面空间比例
+}
+
 // Session 表示人脸识别会话接口，提供人脸检测、特征提取和多帧特征聚合等功能
 type Session interface {
 	// GetFaceMultiFeature 从帧流中聚合一张人脸的特征

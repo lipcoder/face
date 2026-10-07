@@ -9,11 +9,11 @@ import (
 	"github.com/lipcoder/face/internal/reco"
 )
 
-const (
-	minReadyFrames = 3
-	minFaceQuality = 0.6
-	faceEdgeMargin = 0.05 // 人脸框四周至少留出自身边长 5% 的画面空间
-)
+// const (
+// 	minReadyFrames       = 3    // 连续满足条件的最少帧数
+// 	minSearchFaceQuality = 0.6  // 人脸质量的最小阈值，低于此值的人脸不参与特征提取
+// 	faceEdgeMargin       = 0.05 // 人脸框四周至少留出自身边长 5% 的画面空间
+// )
 
 func (s *Session) GetFacePlace(ctx context.Context, frame *media.Frame) ([]reco.FaceInfo, error) {
 	faces, err := s.process(ctx, frame, false, false)
@@ -55,7 +55,12 @@ func (s *Session) GetFaceFeature(ctx context.Context, frame *media.Frame) ([]rec
 	return facesInfo, nil
 }
 
-func (s *Session) GetCyclicFaceFeature(ctx context.Context, frames <-chan *media.Frame, results chan<- []reco.FaceInfo) error {
+func (s *Session) GetCyclicFaceFeature(
+	ctx context.Context,
+	frames <-chan *media.Frame,
+	results chan<- []reco.FaceInfo,
+	config *reco.CyclicFeatureConfig,
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -107,7 +112,7 @@ func (s *Session) GetCyclicFaceFeature(ctx context.Context, frames <-chan *media
 				seeFaceInfos[faceInfo.TrackID] = true
 
 				// 检查人脸是否满足提取特征的条件
-				if !faceReadyForRecognition(*faceInfo, frame) {
+				if !faceReadyForRecognition(*faceInfo, frame, config) {
 					delete(readyFrames, faceInfo.TrackID) // 如果不满足条件，则删除该轨迹的连续帧计数
 					faceInfo.Feature = nil
 					faceInfo.Quality = 0
@@ -122,17 +127,17 @@ func (s *Session) GetCyclicFaceFeature(ctx context.Context, frames <-chan *media
 				}
 
 				// 如果该轨迹已经连续满足条件的帧数小于最小要求，则增加计数
-				if readyFrames[faceInfo.TrackID] < minReadyFrames {
+				if readyFrames[faceInfo.TrackID] < config.MinReadyFrames {
 					readyFrames[faceInfo.TrackID]++
 				}
 
 				// 如果当前轨迹连续帧还未达要求，或者当前帧不需要提取特征，或者质量不达标，则跳过该人脸
 				// 但如果当前轨迹连续帧数已经达到要求，则下一帧需要提取特征
-				if readyFrames[faceInfo.TrackID] < minReadyFrames || !thisNeedFeature ||
-					(s.enableQuality && !(faceInfo.Quality >= minFaceQuality)) || len(faceInfo.Feature) == 0 || len(faceInfo.Feature) != FeatureLength {
+				if readyFrames[faceInfo.TrackID] < config.MinReadyFrames || !thisNeedFeature ||
+					(s.enableQuality && !(faceInfo.Quality >= config.MinSearchFaceQuality)) || len(faceInfo.Feature) == 0 || len(faceInfo.Feature) != FeatureLength {
 					faceInfo.Feature = nil
 					faceInfo.Quality = 0
-					if readyFrames[faceInfo.TrackID] >= minReadyFrames-1 {
+					if readyFrames[faceInfo.TrackID] >= config.MinReadyFrames-1 {
 						needFeature = true
 					}
 					continue // 如果不满足条件，则跳过该人脸
@@ -166,12 +171,12 @@ func (s *Session) GetCyclicFaceFeature(ctx context.Context, frames <-chan *media
 }
 
 // faceReadyForRecognition 判断人脸是否满足提取特征的条件
-func faceReadyForRecognition(face reco.FaceInfo, frame *media.Frame) bool {
+func faceReadyForRecognition(face reco.FaceInfo, frame *media.Frame, config *reco.CyclicFeatureConfig) bool {
 	if frame == nil || face.Box.Width <= 0 || face.Box.Height <= 0 {
 		return false
 	}
-	marginX := int(math.Ceil(float64(face.Box.Width) * faceEdgeMargin))
-	marginY := int(math.Ceil(float64(face.Box.Height) * faceEdgeMargin))
+	marginX := int(math.Ceil(float64(face.Box.Width) * config.FaceEdgeMargin))
+	marginY := int(math.Ceil(float64(face.Box.Height) * config.FaceEdgeMargin))
 	return face.Box.X >= marginX && face.Box.Y >= marginY &&
 		face.Box.X+face.Box.Width+marginX <= frame.Width &&
 		face.Box.Y+face.Box.Height+marginY <= frame.Height &&
