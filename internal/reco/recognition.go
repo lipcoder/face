@@ -49,7 +49,7 @@ type CyclicFeatureConfig struct {
 // Session 表示人脸识别会话接口，提供人脸检测、特征提取和多帧特征聚合等功能
 type Session interface {
 	// GetFaceMultiFeature 从帧流中聚合一张人脸的特征
-	GetFaceMultiFeature(ctx context.Context, frames <-chan *media.Frame, config MultiFrameFeatureConfig) ([]float32, error)
+	GetFaceMultiFeature(ctx context.Context, frames <-chan *media.Frame, status chan<- bool, config MultiFrameFeatureConfig) ([]float32, error)
 	// GetFacePlace 获取人脸在图像中的位置和大小
 	GetFacePlace(ctx context.Context, frame *media.Frame) ([]FaceInfo, error)
 	// GetFaceFeature 获取人脸特征向量

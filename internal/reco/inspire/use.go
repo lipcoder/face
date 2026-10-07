@@ -12,6 +12,7 @@ import (
 func (s *Session) GetFaceMultiFeature(
 	ctx context.Context,
 	frames <-chan *media.Frame,
+	status chan<- bool,
 	config reco.MultiFrameFeatureConfig,
 ) ([]float32, error) {
 	if err := ctx.Err(); err != nil {
@@ -20,8 +21,8 @@ func (s *Session) GetFaceMultiFeature(
 	if s == nil || s.closed || !s.enableQuality || !s.enableRecognition {
 		return nil, fmt.Errorf("多特征聚合要求的功能未被满足")
 	}
-	if frames == nil {
-		return nil, fmt.Errorf("帧流为空")
+	if frames == nil || status == nil {
+		return nil, fmt.Errorf("帧流或处理状态流为空")
 	}
 	if config.SampleCount <= 0 || config.MaxFrames <= 0 || config.MinQuality < 0 {
 		return nil, fmt.Errorf("配置参数无效")
@@ -54,6 +55,14 @@ func (s *Session) GetFaceMultiFeature(
 			faces, err := s.process(ctx, frame, true, true)
 			if err != nil {
 				return nil, err
+			}
+			
+			// 当前帧的图像数据已处理完毕，允许读取下一帧
+			// 这样可以在发送等待期可以ctx取消
+			select {
+			case status <- true:
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
 			if len(faces) == 0 {
 				continue // 无人脸，跳过
