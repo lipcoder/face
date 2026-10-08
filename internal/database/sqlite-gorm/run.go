@@ -17,7 +17,7 @@ import (
 const (
 	StudentIdLength         = 10
 	FeatureLength           = 512
-	FaceSimilarityThreshold = 0.8
+	FaceSimilarityThreshold = 0.7
 	dateLayout              = "2006-01-02"
 )
 
