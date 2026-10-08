@@ -34,6 +34,7 @@ type Database interface {
 	GetAttendanceByPerson(personID string) ([]Attendance, error)
 	// 查询某日的签到记录
 	GetAttendanceByDate(date string) ([]Attendance, error)
+	GetAttendanceByRange(start, end string) ([]Attendance, error)
 	// 关闭数据库连接
 	Close() error
 }

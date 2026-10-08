@@ -63,6 +63,23 @@ func (d *DataBase) GetAttendanceByDate(date string) ([]database.Attendance, erro
 	return attendanceRecords(attendanceRows), nil
 }
 
+func (d *DataBase) GetAttendanceByRange(start, end string) ([]database.Attendance, error) {
+	first, err := time.Parse(dateLayout, start)
+	if err != nil || first.Format(dateLayout) != start {
+		return nil, fmt.Errorf("无效的开始日期")
+	}
+	last, err := time.Parse(dateLayout, end)
+	if err != nil || last.Format(dateLayout) != end || last.Before(first) {
+		return nil, fmt.Errorf("无效的结束日期")
+	}
+	var rows []attendanceRow
+	if err := d.gormDB.Where("date >= ? AND date <= ?", start, end).
+		Order("signed_at DESC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询签到记录失败: %w", err)
+	}
+	return attendanceRecords(rows), nil
+}
+
 // attendanceRecords 将 []attendanceRow 转换为 []database.Attendance
 func attendanceRecords(rows []attendanceRow) []database.Attendance {
 	records := make([]database.Attendance, 0, len(rows))
