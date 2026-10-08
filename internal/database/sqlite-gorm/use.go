@@ -7,12 +7,15 @@ import (
 	"github.com/lipcoder/face/internal/database"
 )
 
-func (d *DataBase) Sign(personID string) error {
-	person, err := d.SearchPerson(&database.Person{
+func (d *DataBase) Sign(personID string) (bool, error) {
+	person, found, err := d.SearchPerson(&database.Person{
 		PersonID: personID,
 	})
 	if err != nil {
-		return err
+		return false, err
+	}
+	if !found {
+		return false, nil
 	}
 
 	local := time.Now().In(d.location)
@@ -24,10 +27,10 @@ func (d *DataBase) Sign(personID string) error {
 	}
 
 	if err := d.gormDB.Create(&row).Error; err != nil {
-		return fmt.Errorf("写入签到记录失败: %w", err)
+		return false, fmt.Errorf("写入签到记录失败: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func (d *DataBase) GetAttendanceByPerson(personID string) ([]database.Attendance, error) {

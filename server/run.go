@@ -39,6 +39,7 @@ func Run(
 	src source.Source,
 	output chan Result,
 	cyclicConfig reco.CyclicFeatureConfig,
+	refresh <-chan struct{},
 ) error {
 	// 三个channel，分别用于：
 	// 1. 读取视频帧
@@ -107,6 +108,12 @@ func Run(
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		// 有刷新请求时，在匹配本帧身份前清空缓存。
+		select {
+		case <-refresh:
+			clear(MapServiceFaceInfos)
+		default:
+		}
 
 		// 要发送的结果
 		ServerResult := Result{
@@ -165,11 +172,17 @@ func Run(
 						newServiceFaceInfo.Name = person.Name
 
 						// 每一个新的 embedding 都允许签到
-						if err := db.Sign(person.PersonID); err != nil {
+						signed, err := db.Sign(person.PersonID)
+						if err != nil {
 							return fmt.Errorf(
 								"签到失败: %w",
 								err,
 							)
+						}
+						if !signed {
+							found = false
+							newServiceFaceInfo.PersonID = ""
+							newServiceFaceInfo.Name = ""
 						}
 					}
 

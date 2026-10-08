@@ -46,7 +46,7 @@ func (attendanceRow) TableName() string { return "attendance" }
 type DataBase struct {
 	mu       sync.RWMutex
 	gormDB   *gorm.DB
-	persons   []database.Person
+	persons  []database.Person
 	location *time.Location
 }
 
@@ -108,7 +108,7 @@ func Open(path string) (*DataBase, error) {
 
 	resultDB := &DataBase{
 		gormDB:   gormDB,
-		persons:   make([]database.Person, 0, len(personRows)),
+		persons:  make([]database.Person, 0, len(personRows)),
 		location: location,
 	}
 
@@ -160,9 +160,9 @@ func (d *DataBase) AddPerson(p *database.Person) error {
 	return nil
 }
 
-func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, error) {
+func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, bool, error) {
 	if p == nil {
-		return nil, fmt.Errorf("无效的人员信息")
+		return nil, false, fmt.Errorf("无效的人员信息")
 	}
 
 	if p.PersonID != "" {
@@ -175,14 +175,14 @@ func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, error) {
 		if err == nil {
 			result, err := decodePerson(row)
 			if err != nil {
-				return nil, fmt.Errorf("读取人员特征失败: %w", err)
+				return nil, false, fmt.Errorf("读取人员特征失败: %w", err)
 			}
 
-			return &result, nil
+			return &result, true, nil
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("按学号查询人员失败: %w", err)
+			return nil, false, fmt.Errorf("按学号查询人员失败: %w", err)
 		}
 	}
 
@@ -196,22 +196,18 @@ func (d *DataBase) SearchPerson(p *database.Person) (*database.Person, error) {
 		if err == nil {
 			result, err := decodePerson(row)
 			if err != nil {
-				return nil, fmt.Errorf("读取人员特征失败: %w", err)
+				return nil, false, fmt.Errorf("读取人员特征失败: %w", err)
 			}
 
-			return &result, nil
+			return &result, true, nil
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("按姓名查询人员失败: %w", err)
+			return nil, false, fmt.Errorf("按姓名查询人员失败: %w", err)
 		}
 	}
 
-	return nil, fmt.Errorf(
-		"未找到匹配的人员，学号 %q、姓名 %q 均无有效匹配",
-		p.PersonID,
-		p.Name,
-	)
+	return nil, false, nil
 }
 
 func (d *DataBase) DeletePerson(personID string) (bool, error) {
@@ -219,11 +215,14 @@ func (d *DataBase) DeletePerson(personID string) (bool, error) {
 		return false, fmt.Errorf("学号为空")
 	}
 
-	person, err := d.SearchPerson(&database.Person{
+	person, found, err := d.SearchPerson(&database.Person{
 		PersonID: personID,
 	})
 	if err != nil {
 		return false, err
+	}
+	if !found {
+		return false, nil
 	}
 
 	if err := d.gormDB.Delete(&personRow{}, person.ID).Error; err != nil {
@@ -248,9 +247,36 @@ func (d *DataBase) ListPersons() ([]database.Person, error) {
 	defer d.mu.RUnlock()
 
 	persons := make([]database.Person, len(d.persons))
-	copy(persons, d.persons)
-	
+	for i := range d.persons {
+		persons[i] = d.persons[i]
+		persons[i].Feature = append([]float32(nil), d.persons[i].Feature...)
+	}
+
 	return persons, nil
+}
+
+func (d *DataBase) UpdatePersonName(personID, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if len(personID) != StudentIdLength || name == "" {
+		return false, fmt.Errorf("无效的学号或姓名")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var index = -1
+	for i := range d.persons {
+		if d.persons[i].PersonID == personID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false, nil
+	}
+	if err := d.gormDB.Model(&personRow{}).Where("person_id = ?", personID).Update("name", name).Error; err != nil {
+		return false, fmt.Errorf("修改姓名失败: %w", err)
+	}
+	d.persons[index].Name = name
+	return true, nil
 }
 
 // encodeFeature 将 []float32 转换为 []byte

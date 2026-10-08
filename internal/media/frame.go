@@ -37,8 +37,9 @@ type Frame struct {
 	// Size 是 Buffer 指向的有效数据大小；Data 模式下使用 len(Data)。
 	Size int
 
-	Width  int
-	Height int
+	Width     int
+	Height    int
+	Framerate float64 // 视频源报告的帧率；未提供时为 0
 
 	Format   PixelFormat
 	Rotation Rotation
