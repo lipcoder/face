@@ -9,12 +9,6 @@ import (
 	"github.com/lipcoder/face/internal/reco"
 )
 
-// const (
-// 	minReadyFrames       = 3    // 连续满足条件的最少帧数
-// 	minSearchFaceQuality = 0.6  // 人脸质量的最小阈值，低于此值的人脸不参与特征提取
-// 	faceEdgeMargin       = 0.05 // 人脸框四周至少留出自身边长 5% 的画面空间
-// )
-
 func (s *Session) GetFacePlace(ctx context.Context, frame *media.Frame) ([]reco.FaceInfo, error) {
 	faces, err := s.process(ctx, frame, false, false)
 	if err != nil {
@@ -59,6 +53,7 @@ func (s *Session) GetCyclicFaceFeature(
 	ctx context.Context,
 	frames <-chan *media.Frame,
 	results chan<- []reco.FaceInfo,
+	retryTracks <-chan []int64,
 	config reco.CyclicFeatureConfig,
 ) error {
 	if err := ctx.Err(); err != nil {
@@ -67,16 +62,15 @@ func (s *Session) GetCyclicFaceFeature(
 	if s == nil || s.closed {
 		return fmt.Errorf("session已关闭")
 	}
-	if frames == nil || results == nil {
+	if frames == nil || results == nil || retryTracks == nil {
 		return fmt.Errorf("帧流或结果流为空")
 	}
 
-	// readyFaceInfos：已通过筛选的轨迹及其特征，键是 TrackID
-	readyFaceInfos := make(map[int64][]reco.FaceInfo)
 	// readyFrames：每条轨迹连续满足位置和姿态要求的帧数
 	readyFrames := make(map[int64]int)
-
-	needFeature := false
+	// 匹配成功后保留首次特征，直到轨迹离开；匹配失败后删除并重新提取。
+	readyFaceInfos := make(map[int64]reco.FaceInfo)
+	needFeature := true
 
 	for {
 		select {
@@ -87,13 +81,9 @@ func (s *Session) GetCyclicFaceFeature(
 				return nil
 			}
 
-			// 当前循环内帧的处理方式
-			thisNeedFeature := needFeature
 			var newFaceInfos []reco.FaceInfo
 			var err error
-
-			// 检测阶段只取位置；连续两帧合格后，下一帧再提取特征
-			if thisNeedFeature {
+			if needFeature {
 				newFaceInfos, err = s.GetFaceFeature(ctx, frame)
 			} else {
 				newFaceInfos, err = s.GetFacePlace(ctx, frame)
@@ -104,12 +94,16 @@ func (s *Session) GetCyclicFaceFeature(
 
 			// seeFaceInfos 记录本帧出现的 TrackID，用于删除已经离开画面的轨迹状态
 			seeFaceInfos := make(map[int64]bool, len(newFaceInfos))
-			needFeature = false
 
 			for i := range newFaceInfos {
 
 				faceInfo := &newFaceInfos[i]
 				seeFaceInfos[faceInfo.TrackID] = true
+				if cached, ok := readyFaceInfos[faceInfo.TrackID]; ok {
+					faceInfo.Feature = cached.Feature
+					faceInfo.Quality = cached.Quality
+					continue
+				}
 
 				// 检查人脸是否满足提取特征的条件
 				if !faceReadyForRecognition(*faceInfo, frame, config) {
@@ -118,34 +112,19 @@ func (s *Session) GetCyclicFaceFeature(
 					faceInfo.Quality = 0
 					continue // 如果不满足条件，则跳过该人脸
 				}
-
-				// 如果轨迹人脸已在缓存中，则直接使用缓存的特征和质量
-				if cached, ok := readyFaceInfos[faceInfo.TrackID]; ok && len(cached) > 0 {
-					faceInfo.Feature = cached[0].Feature
-					faceInfo.Quality = cached[0].Quality
-					continue // 如果已缓存，则跳过该人脸
-				}
-
 				// 如果该轨迹已经连续满足条件的帧数小于最小要求，则增加计数
 				if readyFrames[faceInfo.TrackID] < config.MinReadyFrames {
 					readyFrames[faceInfo.TrackID]++
 				}
 
-				// 如果当前轨迹连续帧还未达要求，或者当前帧不需要提取特征，或者质量不达标，则跳过该人脸
-				// 但如果当前轨迹连续帧数已经达到要求，则下一帧需要提取特征
-				if readyFrames[faceInfo.TrackID] < config.MinReadyFrames || !thisNeedFeature ||
+				// 连续帧数、质量或特征不合格时，本帧只展示位置。
+				if readyFrames[faceInfo.TrackID] < config.MinReadyFrames ||
 					(s.enableQuality && !(faceInfo.Quality >= config.MinSearchFaceQuality)) || len(faceInfo.Feature) == 0 || len(faceInfo.Feature) != FeatureLength {
 					faceInfo.Feature = nil
 					faceInfo.Quality = 0
-					if readyFrames[faceInfo.TrackID] >= config.MinReadyFrames-1 {
-						needFeature = true
-					}
 					continue // 如果不满足条件，则跳过该人脸
 				}
-
-				// 如果当前轨迹连续帧数已经达到要求，则将该人脸信息缓存起来
-				readyFaceInfos[faceInfo.TrackID] = append(readyFaceInfos[faceInfo.TrackID], *faceInfo)
-
+				readyFaceInfos[faceInfo.TrackID] = *faceInfo
 			}
 
 			// 删除已经离开画面的轨迹状态
@@ -163,6 +142,19 @@ func (s *Session) GetCyclicFaceFeature(
 
 			select {
 			case results <- newFaceInfos:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			// 等待本帧匹配结果，只有失败的轨迹在下一帧重新提取特征。
+			select {
+			case tracks, ok := <-retryTracks:
+				if !ok {
+					return nil
+				}
+				for _, id := range tracks {
+					delete(readyFaceInfos, id)
+				}
+				needFeature = len(tracks) > 0 || len(newFaceInfos) == 0
 			case <-ctx.Done():
 				return ctx.Err()
 			}
