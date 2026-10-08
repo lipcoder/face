@@ -1,13 +1,16 @@
 package rtsp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,7 +91,6 @@ func (c *Client) command() *exec.Cmd {
 		"-nostdin", "-hide_banner", "-loglevel", "error",
 		"-rtsp_transport", o.Transport,
 		"-timeout", strconv.FormatInt(o.ReadTimeout.Microseconds(), 10),
-		"-rw_timeout", strconv.FormatInt(o.ReadTimeout.Microseconds(), 10),
 		"-i", o.URL,
 		"-map", "0:v:0", "-an", "-sn", "-dn",
 		"-vf", fmt.Sprintf("scale=%d:%d", o.Width, o.Height),
@@ -106,6 +108,8 @@ func (c *Client) run() {
 		}
 
 		cmd := c.command()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		stdout, err := cmd.StdoutPipe()
 		if err == nil {
 			c.mu.Lock()
@@ -126,10 +130,23 @@ func (c *Client) run() {
 			c.readSeq = c.seq
 			c.mu.Unlock()
 			_ = cmd.Process.Kill() // 中断可能阻塞的管道读取
-			_ = cmd.Wait()
+			err = cmd.Wait()
 			c.mu.Lock()
 			c.cmd = nil
 			c.mu.Unlock()
+		}
+		select {
+		case <-c.stop:
+			return
+		default:
+		}
+		if err != nil {
+			// 保留 FFmpeg 的失败原因，隐藏包含账号密码的摄像头地址。
+			message := strings.TrimSpace(strings.ReplaceAll(stderr.String(), c.options.URL, "<RTSP 地址>"))
+			if message == "" {
+				message = err.Error()
+			}
+			log.Printf("RTSP 拉流失败，%s 后重试: %s", c.options.ReconnectDelay, message)
 		}
 
 		// 每次重连前清除上一条连接留下的帧。
