@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/lipcoder/face/internal/database"
 	"github.com/lipcoder/face/internal/media"
@@ -41,13 +39,13 @@ func Run(
 	cyclicConfig reco.CyclicFeatureConfig,
 	refresh <-chan struct{},
 ) error {
-	// 三个channel，分别用于：
-	// 1. 读取视频帧
+	// 输入帧、检测结果和未匹配轨迹在两个循环之间同步传递。
 	frames := make(chan *media.Frame)
 	defer close(frames)
-	// 2. 获取人脸识别结果
 	faceResults := make(chan []reco.FaceInfo)
-	// 3. 获取 GetCyclicFaceFeature 的错误
+	retryTracks := make(chan []int64)
+	defer close(retryTracks)
+	// 接收检测循环的结束或错误。
 	sessionErr := make(chan error, 1)
 
 	go func() {
@@ -55,24 +53,13 @@ func Run(
 			ctx,
 			frames,
 			faceResults,
+			retryTracks,
 			cyclicConfig,
 		)
 	}()
 
-	// map[string]FaceInfo 用于缓存已经识别过的 embedding
-	//
-	// 这个精确 embedding 以前处理过没有？
-	//              │
-	//       ┌──────┴──────┐
-	//       │             │
-	//      没有           有
-	//       │             │
-	// 数据库余弦搜索     直接复用身份
-	//       │
-	//      Sign
-	//       │
-	//    保存结果
-	MapServiceFaceInfos := make(map[string]ServiceFaceInfo)
+	// 只缓存已匹配的轨迹身份；未匹配的轨迹继续使用后续帧重新查询。
+	MapServiceFaceInfos := make(map[int64]ServiceFaceInfo)
 
 	for {
 		frame, err := src.Read(ctx)
@@ -116,17 +103,23 @@ func Run(
 		}
 
 		// 要发送的结果
+		// 展示端异步消费结果，保留画面副本，避免视频源下一次 Read 复用缓冲区
+		resultFrame := *frame
+		resultFrame.Data = append([]byte(nil), frame.Data...)
 		ServerResult := Result{
-			Frame: frame,
+			Frame: &resultFrame,
 			Faces: make([]ServiceFaceInfo, 0, len(newRecoFaceInfos)),
 		}
 
+		seenTracks := make(map[int64]bool, len(newRecoFaceInfos))
+		var unmatchedTracks []int64
 		for i := range newRecoFaceInfos {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
 			newFaceInfo := &newRecoFaceInfos[i]
+			seenTracks[newFaceInfo.TrackID] = true
 
 			// 将 reco.FaceInfo 转换为 ServiceFaceInfo
 			newServiceFaceInfo := ServiceFaceInfo{
@@ -139,61 +132,59 @@ func Run(
 				},
 			}
 
-			if len(newFaceInfo.Feature) != 0 {
-				// 把 []float32 的原始二进制内容转换成 string，作为 map key
-				buf := make([]byte, len(newFaceInfo.Feature)*4)
-
-				for i, value := range newFaceInfo.Feature {
-					binary.LittleEndian.PutUint32(
-						buf[i*4:],
-						math.Float32bits(value),
+			if oldServiceFaceInfo, ok := MapServiceFaceInfos[newFaceInfo.TrackID]; ok {
+				newServiceFaceInfo.PersonID = oldServiceFaceInfo.PersonID
+				newServiceFaceInfo.Name = oldServiceFaceInfo.Name
+			} else if len(newFaceInfo.Feature) != 0 {
+				person, found, err := db.SearchByFeature(newFaceInfo.Feature)
+				if err != nil {
+					return fmt.Errorf(
+						"查询人脸特征失败: %w",
+						err,
 					)
 				}
 
-				// 将 buf 转换为 string，作为 map key
-				key := string(buf)
+				if found {
+					newServiceFaceInfo.PersonID = person.PersonID
+					newServiceFaceInfo.Name = person.Name
 
-				if oldServiceFaceInfo, ok := MapServiceFaceInfos[key]; ok {
-					// 相同 embedding 已经处理过，直接复用身份信息
-					newServiceFaceInfo.PersonID = oldServiceFaceInfo.PersonID
-					newServiceFaceInfo.Name = oldServiceFaceInfo.Name
-				} else {
-					// 第一次看到这个 embedding，进行数据库余弦搜索
-					person, found, err := db.SearchByFeature(newFaceInfo.Feature)
+					// 轨迹首次匹配成功时记录签到。
+					signed, err := db.Sign(person.PersonID)
 					if err != nil {
 						return fmt.Errorf(
-							"查询人脸特征失败: %w",
+							"签到失败: %w",
 							err,
 						)
 					}
-
-					if found {
-						newServiceFaceInfo.PersonID = person.PersonID
-						newServiceFaceInfo.Name = person.Name
-
-						// 每一个新的 embedding 都允许签到
-						signed, err := db.Sign(person.PersonID)
-						if err != nil {
-							return fmt.Errorf(
-								"签到失败: %w",
-								err,
-							)
-						}
-						if !signed {
-							found = false
-							newServiceFaceInfo.PersonID = ""
-							newServiceFaceInfo.Name = ""
-						}
+					if !signed {
+						found = false
+						newServiceFaceInfo.PersonID = ""
+						newServiceFaceInfo.Name = ""
 					}
+				}
 
-					// 未匹配的特征下次继续查询，以便新录入的人立即生效。
-					if found {
-						MapServiceFaceInfos[key] = newServiceFaceInfo
-					}
+				// 未匹配时不缓存，下一帧使用新特征继续识别。
+				if found {
+					MapServiceFaceInfos[newFaceInfo.TrackID] = newServiceFaceInfo
 				}
 			}
 
+			if newServiceFaceInfo.PersonID == "" {
+				unmatchedTracks = append(unmatchedTracks, newFaceInfo.TrackID)
+			}
 			ServerResult.Faces = append(ServerResult.Faces, newServiceFaceInfo)
+		}
+		for id := range MapServiceFaceInfos {
+			if !seenTracks[id] {
+				delete(MapServiceFaceInfos, id)
+			}
+		}
+		select {
+		case retryTracks <- unmatchedTracks:
+		case err := <-sessionErr:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 
 		// 发布最新结果
