@@ -1,5 +1,3 @@
-//go:build darwin
-
 package local
 
 import (
@@ -7,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -49,6 +48,9 @@ type Client struct {
 func Open(options FrameOptions) (*Client, error) {
 	if options.Device == "" {
 		options.Device = "0"
+		if runtime.GOOS == "linux" {
+			options.Device = "/dev/video0"
+		}
 	}
 
 	if options.Width == 0 {
@@ -65,26 +67,28 @@ func Open(options FrameOptions) (*Client, error) {
 
 	frameSize := options.Width * options.Height * 3 // BGR24格式每个像素占3个字节
 
-	args := []string{
+	var inputArgs []string
+	switch runtime.GOOS {
+	case "darwin":
+		inputArgs = []string{"-f", "avfoundation", "-framerate", strconv.Itoa(options.Framerate),
+			"-video_size", fmt.Sprintf("%dx%d", options.Width, options.Height), "-i", options.Device + ":none"}
+	case "linux":
+		inputArgs = []string{"-f", "v4l2", "-framerate", strconv.Itoa(options.Framerate),
+			"-video_size", fmt.Sprintf("%dx%d", options.Width, options.Height), "-i", options.Device}
+	default:
+		return nil, fmt.Errorf("本地摄像头不支持 %s", runtime.GOOS)
+	}
+	args := append([]string{
 		"-nostdin",
 		"-hide_banner",
 		"-loglevel", "error",
-
-		"-f", "avfoundation",
-		"-framerate", strconv.Itoa(options.Framerate),
-		"-video_size", fmt.Sprintf(
-			"%dx%d",
-			options.Width,
-			options.Height,
-		),
-
-		"-i", options.Device + ":none",
-
+	}, inputArgs...)
+	args = append(args,
 		"-an",
 		"-pix_fmt", "bgr24",
 		"-f", "rawvideo",
 		"pipe:1", // 输出到标准输出
-	}
+	)
 
 	cmd := exec.Command("ffmpeg", args...)
 
