@@ -1,0 +1,50 @@
+body {
+    font: 16px system-ui, sans-serif;
+    max-width: 900px;
+    margin: 32px auto;
+    padding: 0 16px;
+    color: #222;
+    background: #fafafa
+}
+
+h1 {
+    font-size: 24px
+}
+
+.view {
+    background: #111;
+    overflow: hidden;
+    border-radius: 8px
+}
+
+.view img {
+    width: 100%;
+    display: block
+}
+
+form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 20px 0
+}
+
+input,
+button {
+    font: inherit;
+    padding: 9px 12px;
+    border: 1px solid #ccc;
+    border-radius: 5px
+}
+
+button {
+    background: #222;
+    color: white;
+    cursor: pointer;
+    border-color: #222
+}
+
+#message {
+    min-height: 1.5em;
+    color: #444
+}

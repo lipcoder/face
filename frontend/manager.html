@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人员管理</title>
+<link rel="stylesheet" href="/manager.css">
+<h1>人员管理</h1><button id="start" type="button">启动添加人脸</button>
+<button id="stop" type="button" hidden>关闭添加人脸</button>
+<video id="capture" autoplay playsinline muted hidden></video>
+<section id="enroll" hidden>
+    <h2>添加人脸</h2>
+    <div class="view"><img id="preview" alt="从 Go 返回的摄像头画面"></div>
+    <form id="form"><input name="person_id" placeholder="10 位学号" required pattern="[0-9]{10}" maxlength="10"><input
+            name="name" placeholder="姓名" required><button>添加人脸</button></form>
+</section>
+<p id="message">点击按钮后启用本机摄像头</p>
+<h2>人员列表</h2><button id="refresh" type="button">刷新识别</button>
+<table>
+    <thead>
+        <tr>
+            <th>学号</th>
+            <th>姓名</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody id="people"></tbody>
+</table>
+<script defer src="/manager.js"></script>
+
+</html>

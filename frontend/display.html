@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人脸识别</title>
+<link rel="stylesheet" href="/display.css">
+<section class="screen">
+    <h1>人脸识别</h1><canvas id="view"></canvas>
+    <p id="hint">正在等待摄像头画面</p>
+</section>
+<section class="attendance">
+    <h2>本周签到表</h2>
+    <p id="week"></p>
+    <div class="table-scroll">
+        <table class="attendance-grid">
+            <thead>
+                <tr id="attendance-head">
+                    <th>学号</th>
+                    <th>姓名</th>
+                </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+        </table>
+    </div>
+    <p id="empty"></p>
+    <h2>签到日志</h2>
+    <div class="table-scroll">
+        <table class="attendance-log">
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>学号</th>
+                    <th>姓名</th>
+                </tr>
+            </thead>
+            <tbody id="logs"></tbody>
+        </table>
+    </div>
+    <p id="logs-empty"></p>
+</section>
+<script defer src="/display.js"></script>
+
+</html>
