@@ -4,7 +4,7 @@ package inspire
 #cgo darwin CFLAGS: -I${SRCDIR}/../../../.sdk/inspireface-static-darwin-arm64/include -I${SRCDIR}/../../../.sdk/inspireface-static-darwin-arm64/include/inspireface
 #cgo darwin LDFLAGS: -L${SRCDIR}/../../../.sdk/inspireface-static-darwin-arm64/lib -lInspireFace -lMNN -lc++
 #cgo linux CFLAGS: -I${SRCDIR}/../../../.sdk/inspireface-static-linux-amd64/include -I${SRCDIR}/../../../.sdk/inspireface-static-linux-amd64/include/inspireface
-#cgo linux LDFLAGS: -L${SRCDIR}/../../../.sdk/inspireface-static-linux-amd64/lib -lInspireFace -lMNN -lstdc++ -ldl -lpthread
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../.sdk/inspireface-static-linux-amd64/lib -lInspireFace -lMNN -lstdc++ -lm -ldl -lpthread
 
 #include <stdlib.h>
 #include <string.h>
