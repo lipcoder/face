@@ -7,7 +7,6 @@ downloads/
 run.sh
 *.tar
 .env
-frontend/
 
 # macOS
 .DS_Store
