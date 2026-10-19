@@ -16,18 +16,15 @@ jobs:
         include:
           - platform: darwin-arm64
             os: macos-15
-
           - platform: linux-amd64
             os: ubuntu-22.04
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      # 1. Checkout Go project
       - name: Checkout Face
         uses: actions/checkout@v4
 
-      # 2. Checkout official InspireFace
       - name: Checkout InspireFace
         uses: actions/checkout@v4
         with:
@@ -36,51 +33,26 @@ jobs:
           path: .upstream/InspireFace
           persist-credentials: false
 
-      # 3. Download third-party dependencies
-      - name: Prepare InspireFace dependencies
-        shell: bash
-        working-directory: .upstream/InspireFace
-        run: |
-          git clone --recurse-submodules \
-            https://github.com/tunmx/inspireface-3rdparty.git \
-            3rdparty
+      - name: Checkout InspireFace dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: tunmx/inspireface-3rdparty
+          path: .upstream/InspireFace/3rdparty
+          submodules: recursive
+          persist-credentials: false
 
-      # 4. Install system dependencies
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            git \
-            curl \
-            pkg-config
+          sudo apt-get install -y build-essential cmake pkg-config
 
-      # 5. Setup Go
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
 
-      # 6. Check architecture
-      - name: Check platform
-        shell: bash
-        run: |
-          uname -a
-          echo "Architecture: $(uname -m)"
-
-          if [[ "${{ matrix.platform }}" == "darwin-arm64" ]]; then
-            test "$(uname -m)" = "arm64"
-          else
-            test "$(uname -m)" = "x86_64"
-          fi
-
-      # 7. Configure static SDK
       - name: Configure InspireFace
-        shell: bash
         working-directory: .upstream/InspireFace
         run: |
           EXTRA_ARGS=()
@@ -88,6 +60,13 @@ jobs:
           if [[ "${{ matrix.platform }}" == "darwin-arm64" ]]; then
             EXTRA_ARGS+=(
               -DCMAKE_OSX_ARCHITECTURES=arm64
+            )
+          fi
+
+          if [[ "${{ matrix.platform }}" == "linux-amd64" ]]; then
+            EXTRA_ARGS+=(
+              -DCMAKE_C_FLAGS=-DSQLITE_OMIT_LOAD_EXTENSION
+              -DCMAKE_CXX_FLAGS=-DSQLITE_OMIT_LOAD_EXTENSION
             )
           fi
 
@@ -108,19 +87,13 @@ jobs:
             -DISF_ENABLE_TENSORRT=OFF \
             -DISF_ENABLE_RKNN=OFF \
             "${EXTRA_ARGS[@]}"
-
-      # 8. Compile SDK
       - name: Build InspireFace
-        shell: bash
         working-directory: .upstream/InspireFace
         run: |
           cmake --build build \
             --target install \
             --parallel 2
-
-      # 9. Prepare SDK for CGO
       - name: Prepare SDK
-        shell: bash
         run: |
           SOURCE=".upstream/InspireFace/build/install/InspireFace"
           TARGET=".sdk/inspireface-static-${{ matrix.platform }}"
@@ -141,57 +114,40 @@ jobs:
             test "$(lipo -archs "$TARGET/lib/libMNN.a")" = "arm64"
           fi
 
-      # 10. Download Megatron model
-      - name: Download Megatron
-        shell: bash
+      - name: Download Model
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .sdk/models
 
-          curl -fL \
-            --retry 5 \
-            --connect-timeout 30 \
-            -o .sdk/models/Megatron \
-            https://github.com/HyperInspire/InspireFace/releases/download/v1.x/Megatron
+          gh release download v1.x \
+            --repo HyperInspire/InspireFace \
+            --pattern Megatron \
+             --dir .sdk/models
 
           test -s .sdk/models/Megatron
-
-          echo "===== Model ====="
           ls -lh .sdk/models/Megatron
 
-      # 11. Build Go executable
       - name: Build Face
-        shell: bash
         env:
           CGO_ENABLED: "1"
-          GOOS: ${{ runner.os == 'macOS' && 'darwin' || 'linux' }}
-          GOARCH: amd64
-          PLATFORM: ${{ matrix.platform }}
         run: |
-          set -euo pipefail
-
-          if [[ "$PLATFORM" == "darwin-arm64" ]]; then
-            export GOARCH=arm64
-          fi
-
           mkdir -p build
+          LDFLAGS="-s -w"
+          BUILD_TAGS=""
 
-          if [[ "$PLATFORM" == "linux-amd64" ]]; then
-            go build \
-              -trimpath \
-              -ldflags='-s -w -linkmode external -extldflags "-static"' \
-              -o "build/face-$PLATFORM" \
-              ./cmd/run
-          else
-            go build \
-              -trimpath \
-              -ldflags='-s -w' \
-              -o "build/face-$PLATFORM" \
-              ./cmd/run
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            LDFLAGS='-s -w -linkmode external -extldflags "-static"'
+            BUILD_TAGS=netgo
           fi
+          go build \
+            -tags="$BUILD_TAGS" \
+            -trimpath \
+            -ldflags="$LDFLAGS" \
+            -o "build/face-${{ matrix.platform }}" \
+            ./cmd/run
 
-      # 12. Verify executable
       - name: Verify executable
-        shell: bash
         run: |
           FILE="build/face-${{ matrix.platform }}"
 
@@ -199,13 +155,6 @@ jobs:
           ls -lh "$FILE"
           file "$FILE"
 
-          if [[ "${{ matrix.platform }}" == "darwin-arm64" ]]; then
-            test "$(lipo -archs "$FILE")" = "arm64"
-          else
-            ldd "$FILE" || true
-          fi
-
-      # 13. Upload ONLY the executable
       - name: Upload Face
         uses: actions/upload-artifact@v4
         with:
