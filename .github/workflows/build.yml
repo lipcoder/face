@@ -1,0 +1,164 @@
+name: Build Face
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            os: macos-15
+          - platform: linux-amd64
+            os: ubuntu-22.04
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout Face
+        uses: actions/checkout@v4
+
+      - name: Checkout InspireFace
+        uses: actions/checkout@v4
+        with:
+          repository: HyperInspire/InspireFace
+          ref: master
+          path: .upstream/InspireFace
+          persist-credentials: false
+
+      - name: Checkout InspireFace dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: tunmx/inspireface-3rdparty
+          path: .upstream/InspireFace/3rdparty
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure InspireFace
+        working-directory: .upstream/InspireFace
+        run: |
+          EXTRA_ARGS=()
+
+          if [[ "${{ matrix.platform }}" == "darwin-arm64" ]]; then
+            EXTRA_ARGS+=(
+              -DCMAKE_OSX_ARCHITECTURES=arm64
+            )
+          fi
+
+          if [[ "${{ matrix.platform }}" == "linux-amd64" ]]; then
+            EXTRA_ARGS+=(
+              -DCMAKE_C_FLAGS=-DSQLITE_OMIT_LOAD_EXTENSION
+              -DCMAKE_CXX_FLAGS=-DSQLITE_OMIT_LOAD_EXTENSION
+            )
+          fi
+
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DISF_BUILD_SHARED_LIBS=OFF \
+            -DMNN_BUILD_SHARED_LIBS=OFF \
+            -DISF_INSTALL_CPP_HEADER=ON \
+            -DISF_BUILD_WITH_TEST=OFF \
+            -DISF_BUILD_WITH_SAMPLE=OFF \
+            -DISF_ENABLE_BENCHMARK=OFF \
+            -DISF_NEVER_USE_OPENCV=ON \
+            -DISF_ENABLE_OPENCV=OFF \
+            -DISF_ENABLE_APPLE_EXTENSION=OFF \
+            -DISF_ENABLE_TENSORRT=OFF \
+            -DISF_ENABLE_RKNN=OFF \
+            "${EXTRA_ARGS[@]}"
+      - name: Build InspireFace
+        working-directory: .upstream/InspireFace
+        run: |
+          cmake --build build \
+            --target install \
+            --parallel 2
+      - name: Prepare SDK
+        run: |
+          SOURCE=".upstream/InspireFace/build/install/InspireFace"
+          TARGET=".sdk/inspireface-static-${{ matrix.platform }}"
+
+          test -f "$SOURCE/include/inspireface.h"
+          test -f "$SOURCE/lib/libInspireFace.a"
+          test -f "$SOURCE/lib/libMNN.a"
+
+          mkdir -p "$TARGET"
+          cp -R "$SOURCE/include" "$TARGET/"
+          cp -R "$SOURCE/lib" "$TARGET/"
+
+          echo "===== Static libraries ====="
+          ls -lh "$TARGET/lib/"*.a
+
+          if [[ "${{ matrix.platform }}" == "darwin-arm64" ]]; then
+            test "$(lipo -archs "$TARGET/lib/libInspireFace.a")" = "arm64"
+            test "$(lipo -archs "$TARGET/lib/libMNN.a")" = "arm64"
+          fi
+
+      - name: Download Model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .sdk/models
+
+          gh release download v1.x \
+            --repo HyperInspire/InspireFace \
+            --pattern Megatron \
+             --dir .sdk/models
+
+          test -s .sdk/models/Megatron
+          ls -lh .sdk/models/Megatron
+
+      - name: Build Face
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          mkdir -p build
+          LDFLAGS="-s -w"
+          BUILD_TAGS=""
+
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            LDFLAGS='-s -w -linkmode external -extldflags "-static -Wl,-z,noexecstack"'
+            BUILD_TAGS=netgo
+          fi
+          go build \
+            -tags="$BUILD_TAGS" \
+            -trimpath \
+            -ldflags="$LDFLAGS" \
+            -o "build/face-${{ matrix.platform }}" \
+            ./cmd/run
+
+      - name: Verify executable
+        run: |
+          FILE="build/face-${{ matrix.platform }}"
+
+          test -s "$FILE"
+          ls -lh "$FILE"
+          file "$FILE"
+
+      - name: Upload Face
+        uses: actions/upload-artifact@v4
+        with:
+          name: face-${{ matrix.platform }}
+          path: build/face-${{ matrix.platform }}
+          retention-days: 30
+          if-no-files-found: error
