@@ -1,17 +1,14 @@
-PolyForm Noncommercial License 1.0.0
+# GNU Affero General Public License v3.0
 
 Copyright (c) 2026 lipcoder
 
-This project is licensed under the PolyForm Noncommercial License 1.0.0.
+This project is licensed under the GNU Affero General Public License version 3.0 (AGPL-3.0).
 
-You may use, copy, modify, and distribute this software for noncommercial
-purposes only, including learning, research, experimentation, testing,
-personal study, and educational use.
+You may use, copy, modify, and distribute this software, including for commercial purposes, provided that you comply with the terms of the GNU Affero General Public License v3.0.
 
-Commercial use is not permitted without prior written permission from
-the copyright holder.
+If you modify and distribute this software, or make a modified version available for use over a network, you must comply with the applicable source code disclosure and licensing requirements of the AGPL-3.0.
 
-SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+SPDX-License-Identifier: AGPL-3.0-only
 
 Full license text:
-https://polyformproject.org/licenses/noncommercial/1.0.0/
+https://www.gnu.org/licenses/agpl-3.0.html
